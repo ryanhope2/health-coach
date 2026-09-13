@@ -371,9 +371,27 @@ started, asked the user "what's today's date?", and still ended up logging a dup
 exercise entry from the confusion. `now_local = datetime.now(USER_TIMEZONE)` is computed
 fresh on every call (not cached, not the conversation's start time), formatted as e.g.
 "Friday, September 11, 2026 at 8:41 AM EDT" (`%Z` via `zoneinfo` correctly resolves
-EST/EDT across the DST boundary). The system prompt tells the coach to use it for two
-things specifically: noticing a day has rolled over, and inferring meal type when the
-user doesn't say one.
+EST/EDT across the DST boundary; `%A` gives the day name). The system prompt tells the
+coach to use it for two things specifically: noticing a day has rolled over, and
+inferring meal type when the user doesn't say one.
+
+**"This week" means Sunday-Saturday, computed by the backend, not inferred by the
+model.** The user's weekly exercise-goal cadence (and the dashboard's exercise dots) run
+Sunday through Saturday, so the coach needs the same definition — but a first attempt
+that just gave the model the day name (via `%A` above) and told it in the system prompt
+"weeks run Sunday-Saturday, figure out where you are" produced a real, observed failure:
+asked "how am I doing this week" on a Sunday (the first day of a new week), it answered
+with a stale, internally-inconsistent window ("This week (9/8-9/14)") that blended in
+the previous week's entries and didn't match "today" at all — date arithmetic from a day
+name alone turned out to be exactly the kind of thing worth not trusting the model with.
+Fixed by computing the boundaries in Python instead, the same `days_since_sunday =
+(today.weekday() + 1) % 7` / `week_start = today - timedelta(days=days_since_sunday)`
+formula the dashboard route already uses (see Dashboard Layout above) — and adding a
+`"Current week (Sun-Sat): {week_start} to {week_end} — today is day N of 7"` line to
+`build_context_summary()`, right under the current date/time line. The system prompt
+now tells the coach to use those given dates directly rather than deriving them itself.
+Confirmed fixed live: the same question on the same Sunday now correctly answers with
+that Sunday-through-Saturday window and counts only today's entry so far.
 
 **Tool use:** `get_response()` runs a tool-use loop (`TOOLS` in `app/ai_coach.py`) with
 eight tools — `log_body_stat`, `log_measurement`, `log_meal`, `log_exercise`, `set_goal`,

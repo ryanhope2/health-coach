@@ -32,6 +32,15 @@ you genuinely know the current time exactly as well as the user does. Also use i
 (breakfast/lunch/dinner/snack) when the user doesn't specify one and it isn't obvious from context. \
 It's in the user's own timezone (US Eastern unless they say they're traveling).
 
+The user's week for tracking/goals purposes always runs Sunday through Saturday — never a \
+rolling trailing-7-days window. The "Current week" line below already gives you that week's exact \
+start and end dates — use those dates directly rather than computing them yourself from the day \
+name; day-of-week arithmetic is exactly the kind of thing that's easy to get subtly wrong, and \
+getting it wrong here means blending in days from last week or claiming credit for days that \
+haven't happened yet. When the user asks how they're doing "this week," only count entries dated \
+from that Sunday through today — never days later in the week (they haven't happened), and never \
+days before that Sunday (that's last week).
+
 When the user reports something loggable in conversation (a weight, a meal they ate, a workout, a \
 measurement, a new goal), call the matching tool right away instead of just acknowledging it in text. \
 Never say you've logged, saved, or recorded something unless you actually called the tool that turn — \
@@ -341,9 +350,17 @@ def build_context_summary(user) -> str:
 
     today = date.today()
     now_local = datetime.now(USER_TIMEZONE)
+    # Sunday-Saturday calendar week containing today, computed here rather than left for the
+    # model to derive from the day name — day-of-week arithmetic is an easy thing to get subtly
+    # wrong, and getting it wrong means blending in last week's days or crediting future ones.
+    days_since_sunday = (today.weekday() + 1) % 7
+    week_start = today - timedelta(days=days_since_sunday)
+    week_end = week_start + timedelta(days=6)
     lines = [
         f"User: {user.label}",
         f"Current date/time: {now_local.strftime('%A, %B %-d, %Y at %-I:%M %p %Z')}",
+        f"Current week (Sun-Sat): {week_start} to {week_end} — today is day "
+        f"{(today - week_start).days + 1} of 7",
     ]
 
     notes = CoachNote.query.filter_by(user_id=user.id).order_by(CoachNote.updated_at.desc()).all()
