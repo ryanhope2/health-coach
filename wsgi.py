@@ -1,0 +1,11 @@
+import os
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from app import create_app
+
+application = create_app()
+
+if __name__ == "__main__":
+    application.run(debug=True, port=int(os.environ.get("PORT", 5000)))

@@ -1,0 +1,20 @@
+[Unit]
+Description=Moron Fitness
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/moron-fitness
+EnvironmentFile=/home/ubuntu/moron-fitness/.env
+ExecStart=/home/ubuntu/moron-fitness/.venv/bin/gunicorn \
+  --workers 2 --worker-class gevent \
+  --bind 127.0.0.1:5003 \
+  --timeout 120 \
+  --max-requests 1000 --max-requests-jitter 100 \
+  --access-logfile /var/log/moronfitness/access.log \
+  --error-logfile /var/log/moronfitness/error.log \
+  wsgi:application
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

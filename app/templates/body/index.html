@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Body — Moron Fitness{% endblock %}
+{% block content %}
+
+<h1 class="h3 mb-4">Body</h1>
+
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">Log weight / body fat</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('body.add_stat') }}" class="row g-2 guard-double-submit">
+          <div class="col-4">
+            <label class="form-label small">Date</label>
+            <input type="date" name="date" class="form-control" value="{{ today }}">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Weight (lbs)</label>
+            <input type="number" step="0.1" name="weight_lbs" class="form-control">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Body fat %</label>
+            <input type="number" step="0.1" name="body_fat_pct" class="form-control">
+          </div>
+          <div class="col-12">
+            <label class="form-label small">Notes (optional)</label>
+            <input type="text" name="notes" class="form-control">
+          </div>
+          <div class="col-12">
+            <button class="btn btn-success">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">Log a measurement</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('body.add_measurement') }}" class="row g-2 guard-double-submit">
+          <div class="col-4">
+            <label class="form-label small">Date</label>
+            <input type="date" name="date" class="form-control" value="{{ today }}">
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Metric</label>
+            <select name="metric" class="form-select">
+              {% for m in metrics %}
+                <option value="{{ m }}">{{ m|capitalize }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">Inches</label>
+            <input type="number" step="0.1" name="value_in" class="form-control">
+          </div>
+          <div class="col-12">
+            <button class="btn btn-success">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">Weight &amp; body fat history</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Date</th><th>Weight</th><th>Body fat</th><th>Notes</th><th></th></tr></thead>
+          <tbody>
+            {% for s in stats %}
+              <tr>
+                <td>{{ s.date }}</td>
+                <td>{{ s.weight_lbs or '—' }}</td>
+                <td>{{ s.body_fat_pct or '—' }}{% if s.body_fat_pct %}%{% endif %}</td>
+                <td class="text-muted small">{{ s.notes or '' }}</td>
+                <td>
+                  <form method="post" action="{{ url_for('body.delete_stat', stat_id=s.id) }}"
+                        onsubmit="return confirm('Delete this entry?')">
+                    <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" class="text-muted">No entries yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    {% for metric in metrics %}
+      {% if measurements_by_metric.get(metric) %}
+        <div class="card mb-3">
+          <div class="card-header">{{ metric|capitalize }}</div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0">
+              <thead><tr><th>Date</th><th>Inches</th><th></th></tr></thead>
+              <tbody>
+                {% for m in measurements_by_metric[metric] %}
+                  <tr>
+                    <td>{{ m.date }}</td>
+                    <td>{{ m.value_in }}</td>
+                    <td>
+                      <form method="post" action="{{ url_for('body.delete_measurement', measurement_id=m.id) }}"
+                            onsubmit="return confirm('Delete this entry?')">
+                        <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% endif %}
+    {% endfor %}
+    {% if not measurements_by_metric %}
+      <div class="card"><div class="card-body text-muted">No measurements logged yet.</div></div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+{% endblock %}

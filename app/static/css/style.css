@@ -1,0 +1,99 @@
+/* Moron Fitness — minimal overrides on top of Bootstrap */
+
+body {
+  background-color: #f8f9fa;
+}
+
+.navbar-brand {
+  letter-spacing: 0.02em;
+}
+
+.card {
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 .5rem 1rem rgba(0,0,0,.1) !important;
+}
+
+.navbar-toggler {
+  touch-action: manipulation;
+}
+
+/* Coach chat */
+.chat-messages {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.chat-bubble {
+  max-width: 80%;
+  border-radius: 1rem;
+  padding: .6rem 1rem;
+  margin-bottom: .75rem;
+  white-space: pre-wrap;
+}
+.chat-bubble.user {
+  background-color: #198754;
+  color: #fff;
+  margin-left: auto;
+}
+.chat-bubble.assistant {
+  background-color: #e9ecef;
+  color: #212529;
+}
+.chat-bubble.thinking {
+  font-style: italic;
+  color: #6c757d;
+}
+.chat-bubble.error {
+  background-color: #f8d7da;
+  color: #842029;
+  font-style: normal;
+}
+.chat-messages-compact {
+  min-height: 0;
+}
+
+/* Dashboard: vitals + coach chat fill down to the bottom of the viewport,
+   instead of the chat being capped to a short fixed height. .card and
+   .card-body are already flex columns in Bootstrap 5 (card-body: flex: 1 1
+   auto), so giving the shell a definite height and letting .card grow into
+   it is enough — no changes needed inside the widget itself. */
+.dashboard-chat-shell {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 56px - 3rem);
+}
+.dashboard-chat-shell > .card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Dashboard compact vitals row */
+.vitals {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  column-gap: 1.25rem;
+  row-gap: .15rem;
+  font-size: .85rem;
+  align-items: center;
+}
+.vitals [role="button"] {
+  cursor: pointer;
+}
+.vitals .dots {
+  display: flex;
+  gap: 4px;
+  align-self: center;
+}
+.vitals .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  background: #dee2e6;
+}
+.vitals .dot-red { background: #dc3545; }
+.vitals .dot-yellow { background: #ffc107; }
+.vitals .dot-green { background: #198754; }
+

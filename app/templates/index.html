@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Moron Fitness{% endblock %}
+{% block content %}
+
+<div class="dashboard-chat-shell">
+  <div class="vitals mb-3">
+    <div role="button" data-bs-toggle="modal" data-bs-target="#quickWeightModal" title="Tap to log weight">
+      <strong>{{ latest_weight.weight_lbs if latest_weight and latest_weight.weight_lbs else '—' }}</strong>
+      <span class="text-muted">lbs</span>
+      {% if weight_trend %}
+        <i class="bi bi-caret-{{ weight_trend.direction }}-fill {{ weight_trend.css }}" style="font-size:.6rem"></i>
+        <span class="{{ weight_trend.css }}">{{ "%.1f"|format(weight_trend.abs) }}</span>
+      {% endif %}
+    </div>
+    <div role="button" data-bs-toggle="modal" data-bs-target="#quickMealModal" title="Tap to log a meal">
+      <strong>{{ today_calories }}</strong><span class="text-muted">/{{ user.daily_calorie_target or '—' }} kcal</span>
+    </div>
+    <div class="dots" title="{{ exercise_days|selectattr('done')|list|length }} of 7 days exercised this week (Sun-Sat)">
+      {% for d in exercise_days %}
+        <span class="dot{{ ' dot-' + exercise_color if d.done and exercise_color else '' }}"></span>
+      {% endfor %}
+    </div>
+    <div role="button" data-bs-toggle="modal" data-bs-target="#quickWeightModal" title="Tap to log body fat">
+      <strong>{{ latest_bf.body_fat_pct if latest_bf and latest_bf.body_fat_pct else '—' }}</strong>
+      <span class="text-muted">%</span>
+      {% if bf_trend %}
+        <i class="bi bi-caret-{{ bf_trend.direction }}-fill {{ bf_trend.css }}" style="font-size:.6rem"></i>
+        <span class="{{ bf_trend.css }}">{{ "%.1f"|format(bf_trend.abs) }}</span>
+      {% endif %}
+    </div>
+    <div role="button" data-bs-toggle="modal" data-bs-target="#quickMealModal" title="Tap to log a meal">
+      <strong>{{ "%.0f"|format(today_protein) }}</strong><span class="text-muted">/{{ user.daily_protein_target_g or '—' }}g</span>
+    </div>
+  </div>
+
+  {% set compact = true %}
+  {% include "coach/_widget.html" %}
+</div>
+
+<div class="modal fade" id="quickWeightModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('body.add_stat') }}" id="quickWeightForm">
+        <div class="modal-header">
+          <h5 class="modal-title">Log today's weight &amp; body fat</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="date" value="{{ today }}">
+          <input type="hidden" name="next" value="{{ url_for('index') }}">
+          <div class="mb-3">
+            <label class="form-label">Weight (lbs)</label>
+            <input type="text" name="weight_lbs" id="quickWeightInput"
+                   class="form-control" autofocus placeholder="185.4" autocomplete="off">
+            <div class="form-text">
+              Type a number, or tap the mic on your keyboard to dictate — you can say something like
+              "185.4 pounds and 19 percent body fat" right here.
+            </div>
+          </div>
+          <div class="mb-1">
+            <label class="form-label">Body fat % (optional)</label>
+            <input type="text" name="body_fat_pct" id="quickBodyFatInput"
+                   class="form-control" placeholder="19" autocomplete="off">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="quickMealModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="quickMealForm" action="{{ url_for('meals.new') }}" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title">Log a meal</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="quickMealError" class="alert alert-danger py-2" hidden></div>
+          <label class="form-label">What did you eat?</label>
+          <div class="input-group">
+            <textarea name="description" id="quickMealInput" class="form-control" rows="2"
+                      placeholder="e.g. Grilled chicken, rice, and a side salad" autofocus></textarea>
+            <button type="button" class="btn btn-outline-secondary" id="quickMealMicBtn" title="Speak what you ate">
+              <i class="bi bi-mic"></i>
+            </button>
+          </div>
+          <div class="form-text" id="quickMealHeard">Tap the mic and say what you ate, or type it in.</div>
+          <div class="mt-3">
+            <label class="form-label">Photo (optional)</label>
+            <input type="file" name="photo" id="quickMealPhoto" accept="image/*" capture="environment" class="form-control">
+            <img id="quickMealPhotoPreview" class="img-fluid rounded mt-2" style="max-height: 160px;" hidden>
+          </div>
+          <div class="mt-3">
+            <label class="form-label">Meal type (optional)</label>
+            <select name="meal_type" id="quickMealType" class="form-select">
+              <option value="">—</option>
+              <option value="breakfast">Breakfast</option>
+              <option value="lunch">Lunch</option>
+              <option value="dinner">Dinner</option>
+              <option value="snack">Snack</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="quickMealCancelBtn">Cancel</button>
+          <button type="submit" class="btn btn-success" id="quickMealSubmitBtn"><i class="bi bi-stars me-1"></i>Estimate with AI</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guess-meal-type.js') }}"></script>
+<script src="{{ url_for('static', filename='js/coach-chat.js') }}"></script>
+<script>
+  (function () {
+    var modalEl = document.getElementById('quickWeightModal');
+    var form = document.getElementById('quickWeightForm');
+    var weightInput = document.getElementById('quickWeightInput');
+    var bodyFatInput = document.getElementById('quickBodyFatInput');
+
+    modalEl.addEventListener('shown.bs.modal', function () {
+      weightInput.focus();
+    });
+    modalEl.addEventListener('hidden.bs.modal', function () {
+      weightInput.value = '';
+      bodyFatInput.value = '';
+    });
+
+    // Pull a weight and (optionally) a body fat % out of one free-text field,
+    // e.g. "185.4 pounds and 19 percent body fat" or "19% body fat, 185 lbs" —
+    // whether typed or dropped in by the keyboard's own dictation mic. Whichever
+    // number sits next to "%"/"percent"/"body fat" is body fat; the remaining
+    // number (if any) is weight.
+    function extractReadings(text) {
+      var lower = text.toLowerCase();
+      var bfMatch = lower.match(/(\d+(?:\.\d+)?)\s*(?:%|percent)/) || lower.match(/body\s*fat[^\d]*(\d+(?:\.\d+)?)/);
+      var bodyFat = bfMatch ? bfMatch[1] : null;
+      var remaining = bfMatch ? lower.replace(bfMatch[0], ' ') : lower;
+      var weightMatch = remaining.match(/\d+(?:\.\d+)?/);
+      var weight = weightMatch ? weightMatch[0] : null;
+      return { weight: weight, bodyFat: bodyFat };
+    }
+
+    // Normalize whatever's in the fields down to plain numbers before they're
+    // saved — runs when either field loses focus (right after dictation
+    // finishes or you tab away) and again on submit as a safety net.
+    function normalizeFields() {
+      var weightText = weightInput.value.trim();
+      var bodyFatText = bodyFatInput.value.trim();
+      var weightFinal = null;
+      var bodyFatFinal = null;
+
+      if (weightText) {
+        var r = extractReadings(weightText);
+        weightFinal = r.weight;
+        bodyFatFinal = r.bodyFat;
+      }
+      if (!bodyFatFinal && bodyFatText) {
+        var r2 = extractReadings(bodyFatText);
+        bodyFatFinal = r2.bodyFat || r2.weight;
+      }
+
+      if (weightFinal !== null) weightInput.value = weightFinal;
+      if (bodyFatFinal !== null) bodyFatInput.value = bodyFatFinal;
+    }
+
+    weightInput.addEventListener('change', normalizeFields);
+    bodyFatInput.addEventListener('change', normalizeFields);
+    form.addEventListener('submit', normalizeFields);
+  })();
+
+  (function () {
+    var modalEl = document.getElementById('quickMealModal');
+    var descInput = document.getElementById('quickMealInput');
+    var micBtn = document.getElementById('quickMealMicBtn');
+    var heard = document.getElementById('quickMealHeard');
+    var defaultHeardText = heard.textContent;
+    var form = document.getElementById('quickMealForm');
+    var submitBtn = document.getElementById('quickMealSubmitBtn');
+    var cancelBtn = document.getElementById('quickMealCancelBtn');
+    var errorBox = document.getElementById('quickMealError');
+    var photoInput = document.getElementById('quickMealPhoto');
+    var photoPreview = document.getElementById('quickMealPhotoPreview');
+    var mealType = document.getElementById('quickMealType');
+    var submitting = false;
+
+    photoInput.addEventListener('change', function () {
+      if (photoInput.files && photoInput.files[0]) {
+        photoPreview.src = URL.createObjectURL(photoInput.files[0]);
+        photoPreview.hidden = false;
+      } else {
+        photoPreview.hidden = true;
+      }
+    });
+
+    modalEl.addEventListener('shown.bs.modal', function () {
+      descInput.focus();
+      mealType.value = guessMealType();
+    });
+    modalEl.addEventListener('hidden.bs.modal', function () {
+      heard.textContent = defaultHeardText;
+      errorBox.hidden = true;
+      descInput.value = '';
+      photoInput.value = '';
+      photoPreview.hidden = true;
+      mealType.value = '';
+    });
+
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      micBtn.hidden = true;
+    } else {
+      var recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+      var listening = false;
+
+      function setListening(on) {
+        listening = on;
+        micBtn.classList.toggle('btn-outline-secondary', !on);
+        micBtn.classList.toggle('btn-danger', on);
+        micBtn.innerHTML = on ? '<i class="bi bi-mic-fill"></i>' : '<i class="bi bi-mic"></i>';
+      }
+
+      recognition.addEventListener('result', function (e) {
+        var transcript = e.results[0][0].transcript;
+        descInput.value = descInput.value ? descInput.value + ' ' + transcript : transcript;
+        heard.textContent = 'Heard "' + transcript + '". Adjust if that\'s wrong.';
+      });
+      recognition.addEventListener('end', function () { setListening(false); });
+      recognition.addEventListener('error', function (e) {
+        setListening(false);
+        heard.textContent = e.error === 'not-allowed'
+          ? 'Microphone access denied — type it in instead.'
+          : "Didn't catch that — try again or type it in.";
+      });
+
+      micBtn.addEventListener('click', function () {
+        if (listening) {
+          recognition.stop();
+          return;
+        }
+        heard.textContent = 'Listening…';
+        setListening(true);
+        recognition.start();
+      });
+    }
+
+    function setBusy(busy) {
+      submitBtn.disabled = busy;
+      cancelBtn.disabled = busy;
+      descInput.disabled = busy;
+      photoInput.disabled = busy;
+      mealType.disabled = busy;
+      submitBtn.innerHTML = busy
+        ? '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Analyzing…'
+        : '<i class="bi bi-stars me-1"></i>Estimate with AI';
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (submitting) return;
+      if (!descInput.value.trim() && !(photoInput.files && photoInput.files[0])) {
+        errorBox.textContent = 'Add a description or a photo first.';
+        errorBox.hidden = false;
+        return;
+      }
+      submitting = true;
+      errorBox.hidden = true;
+      // Snapshot before disabling — disabled fields are excluded from FormData.
+      var formData = new FormData(form);
+      setBusy(true);
+
+      fetch(form.action, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        body: formData,
+      })
+        .then(function (res) {
+          return res.json().then(function (data) {
+            if (!res.ok) throw new Error(data.error || 'request failed (' + res.status + ')');
+            return data;
+          });
+        })
+        .then(function (data) {
+          window.location.href = data.redirect;
+        })
+        .catch(function (err) {
+          errorBox.textContent = err.message || "Sorry, that didn't go through. Try again.";
+          errorBox.hidden = false;
+          submitting = false;
+          setBusy(false);
+        });
+    });
+  })();
+</script>
+{% endblock %}

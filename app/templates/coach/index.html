@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Coach — Moron Fitness{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Coach</h1>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('coach.notes') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-journal-text me-1"></i>What my coach knows
+    </a>
+    <form method="post" action="{{ url_for('coach.clear') }}" onsubmit="return confirm('Clear chat history?')">
+      <button class="btn btn-sm btn-outline-secondary">Clear chat</button>
+    </form>
+  </div>
+</div>
+
+{% include "coach/_widget.html" %}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/coach-chat.js') }}"></script>
+{% endblock %}

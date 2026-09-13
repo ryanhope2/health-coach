@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Meals — Moron Fitness{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">Meals</h1>
+  <a href="{{ url_for('meals.new') }}" class="btn btn-success"><i class="bi bi-plus-lg me-1"></i>Log a meal</a>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card"><div class="card-body">
+      <div class="text-muted small">Today's calories</div>
+      <div class="fs-4 fw-bold">{{ today_calories }}</div>
+    </div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card"><div class="card-body">
+      <div class="text-muted small">Today's protein</div>
+      <div class="fs-4 fw-bold">{{ "%.0f"|format(today_protein) }}g</div>
+    </div></div>
+  </div>
+</div>
+
+{% if saved_meals %}
+<div class="card mb-4">
+  <div class="card-header">Quick meals</div>
+  <div class="card-body d-flex flex-wrap gap-2">
+    {% for sm in saved_meals %}
+      <div class="d-flex align-items-stretch">
+        <form method="post" action="{{ url_for('meals.quick_log', saved_meal_id=sm.id) }}" class="quick-meal-form guard-double-submit">
+          <input type="hidden" name="meal_type" class="quick-meal-type">
+          <button class="btn btn-outline-success btn-sm rounded-end-0" title="Log this now">
+            {{ sm.name }}
+            <span class="text-muted">({{ sm.calories or '?' }} kcal{% if sm.protein_g %} / {{ sm.protein_g }}g{% endif %})</span>
+          </button>
+        </form>
+        <form method="post" action="{{ url_for('meals.delete_saved_meal', saved_meal_id=sm.id) }}"
+              onsubmit="return confirm('Remove \'{{ sm.name }}\' from quick meals?')">
+          <button class="btn btn-outline-secondary btn-sm rounded-start-0 border-start-0" title="Remove from quick meals">
+            <i class="bi bi-x"></i>
+          </button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if pending_meals %}
+<div class="card mb-4 border-warning">
+  <div class="card-header bg-warning-subtle">Needs review</div>
+  <div class="list-group list-group-flush">
+    {% for m in pending_meals %}
+      <a href="{{ url_for('meals.review', meal_id=m.id) }}"
+         class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+        <span>{{ m.description or (m.meal_type or 'Meal')|capitalize }}</span>
+        <span class="text-muted small">{{ m.logged_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="list-group list-group-flush">
+    {% for day in days %}
+      <div class="list-group-item">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>{{ day.label }}</strong>
+          <span class="text-muted small">{{ day.calories }} kcal · {{ "%.0f"|format(day.protein) }}g protein</span>
+        </div>
+        {% for group in day.meal_groups %}
+          <details class="mb-1"{{ ' open' if day.is_today else '' }}>
+            <summary class="d-flex justify-content-between" style="cursor: pointer;">
+              <span>{{ group.label }}</span>
+              <span class="text-muted small">{{ group.calories }} kcal · {{ "%.0f"|format(group.protein) }}g protein</span>
+            </summary>
+            <div class="ps-3 mt-1">
+              {% for e in group.entries %}
+                <div class="d-flex justify-content-between align-items-center py-1 border-top">
+                  <a href="{{ url_for('meals.review', meal_id=e.id) }}" class="text-truncate me-2">
+                    {{ e.description or group.label }}
+                  </a>
+                  <span class="text-muted small text-nowrap">{{ e.calories or '—' }} kcal · {{ e.protein_g or '—' }}g</span>
+                </div>
+              {% endfor %}
+            </div>
+          </details>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="list-group-item text-muted">No meals logged yet.</div>
+    {% endfor %}
+  </div>
+  {% if has_more %}
+    <div class="card-footer text-center">
+      <a href="{{ url_for('meals.index', before=next_before) }}" class="btn btn-sm btn-outline-secondary">Show earlier days</a>
+    </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guess-meal-type.js') }}"></script>
+<script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+<script>
+  document.querySelectorAll('.quick-meal-type').forEach(function (el) {
+    el.value = guessMealType();
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}What your coach knows — Moron Fitness{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">What your coach knows</h1>
+  <a href="{{ url_for('coach.index') }}" class="btn btn-sm btn-outline-secondary">Back to chat</a>
+</div>
+
+<p class="text-muted">
+  Durable facts about your health journey — goals, motivations, ongoing strategies — that your coach
+  keeps in mind every conversation, no matter how long the chat has gotten. The coach can add or update
+  these as you talk; you can also edit or remove anything here directly.
+</p>
+
+<div class="card mb-4">
+  <div class="card-header">Add a note</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('coach.add_note') }}" class="guard-double-submit">
+      <div class="mb-2">
+        <label class="form-label small">Topic</label>
+        <input type="text" name="key" class="form-control" placeholder="e.g. alcohol strategy" required>
+      </div>
+      <div class="mb-3">
+        <label class="form-label small">Details</label>
+        <textarea name="content" class="form-control" rows="3" placeholder="What should your coach know?" required></textarea>
+      </div>
+      <button class="btn btn-success">Save</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="list-group list-group-flush">
+    {% for n in notes %}
+      <div class="list-group-item">
+        <form method="post" action="{{ url_for('coach.update_note', note_id=n.id) }}" class="guard-double-submit">
+          <div class="row g-2">
+            <div class="col-12 col-md-4">
+              <label class="form-label small">Topic</label>
+              <input type="text" name="key" class="form-control form-control-sm" value="{{ n.key }}" required>
+            </div>
+            <div class="col-12 col-md-8">
+              <label class="form-label small">Details</label>
+              <textarea name="content" class="form-control form-control-sm" rows="3" required>{{ n.content }}</textarea>
+            </div>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mt-2">
+            <button class="btn btn-sm btn-outline-success">Save</button>
+            <span class="text-muted small">updated {{ n.updated_at.strftime('%Y-%m-%d') }}</span>
+          </div>
+        </form>
+        <form method="post" action="{{ url_for('coach.delete_note', note_id=n.id) }}"
+              onsubmit="return confirm('Delete this note?')" class="mt-1">
+          <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i>Delete</button>
+        </form>
+      </div>
+    {% else %}
+      <div class="list-group-item text-muted">
+        Nothing saved yet — your coach will add notes here as you talk, or add one yourself above.
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+{% endblock %}

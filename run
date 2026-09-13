@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Moron Fitness — deployment and operations script
+# Usage: ./run <command>
+#
+# Runs on the same server as vibe-split. Requires SSH alias "vibesplit" in
+# ~/.ssh/config (reused — same box, see deploy/hosts.ini).
+set -euo pipefail
+
+SERVER="vibesplit"
+REMOTE_PATH="/home/ubuntu/moron-fitness"
+LOCAL_PATH="$(cd "$(dirname "$0")" && pwd)"
+SERVICE="moronfitness"
+DOMAIN="moron.bigpour.app"
+PORT=5003   # vibesplit uses 5002 on this box — keep this free
+
+RSYNC_ARGS=(
+    -av
+    --exclude='.git'
+    --exclude='.env'
+    --exclude='venv'
+    --exclude='.venv'
+    --exclude='instance'
+    --exclude='__pycache__'
+    --exclude='*.pyc'
+    --exclude='.env.example'
+)
+
+sync_files() {
+    echo "→ Syncing files to $SERVER:$REMOTE_PATH ..."
+    rsync "${RSYNC_ARGS[@]}" "$LOCAL_PATH/" "$SERVER:$REMOTE_PATH/"
+}
+
+cmd="${1:-help}"
+
+case "$cmd" in
+
+    deploy)
+        sync_files
+        echo "→ Installing/upgrading dependencies ..."
+        ssh "$SERVER" "cd $REMOTE_PATH && .venv/bin/pip install -q -r requirements.txt"
+        echo "→ Restarting $SERVICE ..."
+        ssh "$SERVER" "sudo systemctl restart $SERVICE"
+        echo "✓ Deployed"
+        ;;
+
+    sync)
+        sync_files
+        echo "✓ Files synced (service not restarted)"
+        ;;
+
+    restart)
+        ssh "$SERVER" "sudo systemctl restart $SERVICE"
+        echo "✓ Restarted"
+        ;;
+
+    setup)
+        # First-time setup. Assumes .env is already placed at $REMOTE_PATH/.env.
+        sync_files
+        echo "→ Creating virtualenv and installing deps ..."
+        ssh "$SERVER" "cd $REMOTE_PATH && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
+        echo "→ Initializing database ..."
+        ssh "$SERVER" "cd $REMOTE_PATH && .venv/bin/python init_db.py"
+        echo "→ Creating log directory ..."
+        ssh "$SERVER" "sudo mkdir -p /var/log/$SERVICE && sudo chown ubuntu:ubuntu /var/log/$SERVICE"
+        echo "→ Installing systemd service ..."
+        ssh "$SERVER" "sudo cp $REMOTE_PATH/$SERVICE.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable $SERVICE"
+        echo "→ Installing temporary HTTP-only nginx config (pre-cert) ..."
+        ssh "$SERVER" "echo 'server { listen 80; server_name $DOMAIN; location / { proxy_pass http://127.0.0.1:$PORT; } }' | sudo tee /etc/nginx/sites-available/$SERVICE > /dev/null && sudo ln -sf /etc/nginx/sites-available/$SERVICE /etc/nginx/sites-enabled/$SERVICE && sudo nginx -t && sudo systemctl reload nginx"
+        echo "→ Starting service ..."
+        ssh "$SERVER" "sudo systemctl start $SERVICE"
+        echo "→ Installing daily photo-cleanup cron ..."
+        ssh "$SERVER" "(crontab -l 2>/dev/null | grep -v moron-fitness/cleanup_photos.py; echo '17 4 * * * cd $REMOTE_PATH && .venv/bin/python cleanup_photos.py >> /var/log/$SERVICE/cleanup.log 2>&1') | crontab -"
+        echo ""
+        echo "✓ Setup complete. Next: ./run cert"
+        ;;
+
+    cert)
+        echo "→ Obtaining SSL cert for $DOMAIN ..."
+        ssh "$SERVER" "sudo certbot certonly --nginx -d $DOMAIN"
+        echo "→ Installing full HTTPS nginx config ..."
+        ssh "$SERVER" "sudo cp $REMOTE_PATH/nginx-$SERVICE.conf /etc/nginx/sites-available/$SERVICE && sudo nginx -t && sudo systemctl reload nginx"
+        echo "✓ Cert obtained and nginx reloaded"
+        ;;
+
+    init-db)
+        ssh "$SERVER" "cd $REMOTE_PATH && .venv/bin/python init_db.py"
+        echo "✓ Database initialized"
+        ;;
+
+    status)
+        ssh "$SERVER" "sudo systemctl status $SERVICE --no-pager"
+        ;;
+
+    logs)
+        ssh "$SERVER" "tail -f /var/log/$SERVICE/access.log /var/log/$SERVICE/error.log"
+        ;;
+
+    logs-err)
+        ssh "$SERVER" "tail -n 100 /var/log/$SERVICE/error.log"
+        ;;
+
+    ssh)
+        ssh "$SERVER"
+        ;;
+
+    help|--help|-h)
+        echo ""
+        echo "  Moron Fitness — run script"
+        echo ""
+        echo "  Usage: ./run <command>"
+        echo ""
+        echo "  Deploy"
+        echo "    deploy       Sync files + pip install + restart service"
+        echo "    sync         Sync files only (no restart)"
+        echo "    restart      Restart service only (no file sync)"
+        echo ""
+        echo "  First-time"
+        echo "    setup        Sync, create venv, init db, install service + nginx + cron"
+        echo "    cert         Obtain SSL cert for $DOMAIN via certbot"
+        echo "    init-db      Run init_db.py on the server (safe to re-run)"
+        echo ""
+        echo "  Operations"
+        echo "    status       Check service status"
+        echo "    logs         Tail access + error logs (live)"
+        echo "    logs-err     Show last 100 lines of error log"
+        echo "    ssh          Open a shell on the production server"
+        echo ""
+        ;;
+
+    *)
+        echo "Unknown command: $cmd — run './run help' for usage"
+        exit 1
+        ;;
+
+esac

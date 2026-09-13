@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Log a meal — Moron Fitness{% endblock %}
+{% block content %}
+
+<h1 class="h3 mb-4">Log a meal</h1>
+
+<div class="card">
+  <div class="card-body">
+    <div id="mealFormError" class="alert alert-danger py-2" hidden></div>
+
+    <form id="mealForm" method="post" action="{{ url_for('meals.new') }}" enctype="multipart/form-data">
+      <div class="mb-3">
+        <label class="form-label">What did you eat?</label>
+        <textarea name="description" id="mealDescription" class="form-control" rows="3"
+                  placeholder="e.g. Grilled chicken breast, a cup of rice, and a side salad"></textarea>
+        <div class="form-text">A photo, a description, or both — whatever's easiest.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Photo (optional)</label>
+        <input type="file" name="photo" id="mealPhoto" accept="image/*" capture="environment" class="form-control">
+        <img id="mealPhotoPreview" class="img-fluid rounded mt-2" style="max-height: 200px;" hidden>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Meal type (optional)</label>
+        <select name="meal_type" id="mealType" class="form-select">
+          <option value="">—</option>
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="dinner">Dinner</option>
+          <option value="snack">Snack</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-success" id="mealSubmitBtn"><i class="bi bi-stars me-1"></i>Estimate with AI</button>
+      <a href="{{ url_for('meals.index') }}" class="btn btn-outline-secondary" id="mealCancelLink">Cancel</a>
+      <span id="mealStatus" class="text-muted small ms-2" hidden></span>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guess-meal-type.js') }}"></script>
+<script>
+  document.getElementById('mealType').value = guessMealType();
+
+  var photoInput = document.getElementById('mealPhoto');
+  var photoPreview = document.getElementById('mealPhotoPreview');
+  photoInput.addEventListener('change', function () {
+    if (photoInput.files && photoInput.files[0]) {
+      photoPreview.src = URL.createObjectURL(photoInput.files[0]);
+      photoPreview.hidden = false;
+    } else {
+      photoPreview.hidden = true;
+    }
+  });
+
+  var form = document.getElementById('mealForm');
+  var submitBtn = document.getElementById('mealSubmitBtn');
+  var cancelLink = document.getElementById('mealCancelLink');
+  var status = document.getElementById('mealStatus');
+  var errorBox = document.getElementById('mealFormError');
+  var inputs = form.querySelectorAll('input, textarea, select');
+  var submitting = false;
+
+  function setBusy(busy) {
+    submitBtn.disabled = busy;
+    cancelLink.classList.toggle('disabled', busy);
+    inputs.forEach(function (el) { el.disabled = busy; });
+    if (busy) {
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Analyzing…';
+      status.textContent = 'Uploading and estimating nutrition — this can take up to 15 seconds.';
+      status.hidden = false;
+    } else {
+      submitBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Estimate with AI';
+      status.hidden = true;
+    }
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (submitting) return;
+    submitting = true;
+    errorBox.hidden = true;
+    // Snapshot the form data BEFORE disabling fields — disabled fields are
+    // excluded from FormData, so building this after setBusy(true) silently
+    // drops the description/photo/meal_type from the request.
+    var formData = new FormData(form);
+    setBusy(true);
+
+    fetch(form.action || window.location.href, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      body: formData,
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok) throw new Error(data.error || 'request failed (' + res.status + ')');
+          return data;
+        });
+      })
+      .then(function (data) {
+        window.location.href = data.redirect;
+      })
+      .catch(function (err) {
+        errorBox.textContent = err.message || "Sorry, that didn't go through. Try again.";
+        errorBox.hidden = false;
+        submitting = false;
+        setBusy(false);
+      });
+  });
+</script>
+{% endblock %}

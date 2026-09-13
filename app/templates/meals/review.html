@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Review meal — Moron Fitness{% endblock %}
+{% block content %}
+
+<h1 class="h3 mb-4">Review meal</h1>
+
+<div class="row g-3">
+  {% if meal.photo_path %}
+    <div class="col-12 col-md-4">
+      <img src="{{ url_for('meals.photo', meal_id=meal.id) }}" class="img-fluid rounded shadow-sm">
+    </div>
+  {% endif %}
+  <div class="col-12 {{ 'col-md-8' if meal.photo_path else '' }}">
+    {% if meal.description %}
+      <p class="text-muted">{{ meal.description }}</p>
+    {% endif %}
+
+    {% if meal.items %}
+      <table class="table table-sm">
+        <thead><tr><th>Item</th><th>Qty</th><th>kcal</th><th>Protein</th><th>Carbs</th><th>Fat</th></tr></thead>
+        <tbody>
+          {% for item in meal.items %}
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ item.quantity or '' }}</td>
+              <td>{{ item.calories or '' }}</td>
+              <td>{{ item.protein_g or '' }}</td>
+              <td>{{ item.carbs_g or '' }}</td>
+              <td>{{ item.fat_g or '' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="form-text mb-3">AI estimate above. Adjust the totals below if anything looks off, then confirm.</div>
+    {% endif %}
+
+    <form method="post" class="guard-double-submit">
+      <div class="row g-2">
+        <div class="col-6 col-md-3">
+          <label class="form-label small">Meal type</label>
+          <select name="meal_type" class="form-select">
+            <option value="" {{ 'selected' if not meal.meal_type else '' }}>—</option>
+            <option value="breakfast" {{ 'selected' if meal.meal_type == 'breakfast' else '' }}>Breakfast</option>
+            <option value="lunch" {{ 'selected' if meal.meal_type == 'lunch' else '' }}>Lunch</option>
+            <option value="dinner" {{ 'selected' if meal.meal_type == 'dinner' else '' }}>Dinner</option>
+            <option value="snack" {{ 'selected' if meal.meal_type == 'snack' else '' }}>Snack</option>
+          </select>
+        </div>
+      </div>
+      <div class="row g-2 mt-0">
+        <div class="col-6 col-md-3">
+          <label class="form-label small">Calories</label>
+          <input type="number" name="calories" class="form-control" value="{{ meal.calories or '' }}">
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small">Protein (g)</label>
+          <input type="number" step="0.1" name="protein_g" class="form-control" value="{{ meal.protein_g or '' }}">
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small">Carbs (g)</label>
+          <input type="number" step="0.1" name="carbs_g" class="form-control" value="{{ meal.carbs_g or '' }}">
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small">Fat (g)</label>
+          <input type="number" step="0.1" name="fat_g" class="form-control" value="{{ meal.fat_g or '' }}">
+        </div>
+      </div>
+
+      <div class="form-check mt-3">
+        <input class="form-check-input" type="checkbox" name="save_as_quick_meal" value="1" id="saveAsQuickMeal">
+        <label class="form-check-label" for="saveAsQuickMeal">
+          Save this as a quick-entry meal for later (you eat this again? tap once next time)
+        </label>
+      </div>
+      <div class="mb-3 mt-2" id="quickMealNameField" hidden>
+        <label class="form-label small">Quick meal name</label>
+        <input type="text" name="quick_meal_name" id="quickMealName" class="form-control"
+               placeholder="e.g. Chicken &amp; rice bowl" value="{{ (meal.description or '')[:60] }}">
+      </div>
+
+      <div class="mt-3">
+        <button class="btn btn-success"><i class="bi bi-check-lg me-1"></i>Confirm &amp; save</button>
+        <a href="{{ url_for('meals.index') }}" class="btn btn-outline-secondary">Back</a>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('meals.delete', meal_id=meal.id) }}" class="d-inline"
+          onsubmit="return confirm('Delete this meal entirely?')">
+      <button class="btn btn-outline-danger mt-2"><i class="bi bi-trash me-1"></i>Delete</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+<script>
+  var checkbox = document.getElementById('saveAsQuickMeal');
+  var nameField = document.getElementById('quickMealNameField');
+  checkbox.addEventListener('change', function () {
+    nameField.hidden = !checkbox.checked;
+    if (checkbox.checked) document.getElementById('quickMealName').focus();
+  });
+</script>
+{% endblock %}
