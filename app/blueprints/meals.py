@@ -8,7 +8,7 @@ from flask import (Blueprint, current_app, flash, jsonify, redirect, render_temp
 from ..extensions import db
 from ..meal_ai import parse_meal
 from ..models import FoodItem, MealEntry, SavedMeal
-from ..timeutils import local_today, to_local_date
+from ..timeutils import local_date_to_utc_noon, local_today, to_local_date
 
 meals_bp = Blueprint("meals", __name__, url_prefix="/meals")
 
@@ -40,6 +40,22 @@ def _day_label(day, today, yesterday):
     if day == yesterday:
         return "Yesterday"
     return day.strftime("%A, %B %-d")
+
+
+def _parse_logged_date(date_str):
+    """Convert a YYYY-MM-DD string to a naive-UTC datetime suitable for logged_at.
+    Today → utcnow() (preserve natural entry order within the day).
+    Any other date → noon Eastern on that day (safe mid-day anchor, no UTC-offset risk).
+    Missing/invalid → None (caller skips the assignment, letting the model default fire)."""
+    if not date_str:
+        return None
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    if d == local_today():
+        return datetime.utcnow()
+    return local_date_to_utc_noon(d)
 
 
 @meals_bp.route("/")
@@ -138,6 +154,7 @@ def new():
 
     description = request.form.get("description", "").strip() or None
     meal_type = request.form.get("meal_type") or None
+    logged_at = _parse_logged_date(request.form.get("logged_date"))
     photo = request.files.get("photo")
 
     photo_path = None
@@ -155,13 +172,16 @@ def new():
     if not description and not photo_path:
         return fail("Add a description or a photo (or both).")
 
-    meal = MealEntry(
+    meal_kwargs = dict(
         user_id=_current_user_id(),
         meal_type=meal_type,
         description=description,
         photo_path=photo_path,
         status="pending",
     )
+    if logged_at is not None:
+        meal_kwargs["logged_at"] = logged_at
+    meal = MealEntry(**meal_kwargs)
     db.session.add(meal)
     db.session.commit()
 
@@ -213,6 +233,9 @@ def review(meal_id):
         meal.protein_g = _parse_float(request.form.get("protein_g"))
         meal.carbs_g = _parse_float(request.form.get("carbs_g"))
         meal.fat_g = _parse_float(request.form.get("fat_g"))
+        logged_at = _parse_logged_date(request.form.get("logged_date"))
+        if logged_at is not None:
+            meal.logged_at = logged_at
         meal.status = "confirmed"
 
         if request.form.get("save_as_quick_meal") == "1":
@@ -241,7 +264,8 @@ def review(meal_id):
         flash(f"Meal logged{flash_suffix}.", "success")
         return redirect(url_for("meals.index"))
 
-    return render_template("meals/review.html", meal=meal)
+    meal_date = to_local_date(meal.logged_at)
+    return render_template("meals/review.html", meal=meal, meal_date=meal_date)
 
 
 @meals_bp.route("/<int:meal_id>/photo")

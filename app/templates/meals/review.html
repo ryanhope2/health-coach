@@ -46,6 +46,11 @@
             <option value="snack" {{ 'selected' if meal.meal_type == 'snack' else '' }}>Snack</option>
           </select>
         </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label small">Date</label>
+          <input type="date" name="logged_date" class="form-control"
+                 value="{{ meal_date.strftime('%Y-%m-%d') }}">
+        </div>
       </div>
       <div class="row g-2 mt-0">
         <div class="col-6 col-md-3">

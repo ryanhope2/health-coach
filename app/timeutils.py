@@ -28,3 +28,12 @@ def to_local_date(naive_utc_dt: datetime) -> date:
     timezone-aware date truncation, so any day-grouping/boundary logic against a
     DateTime column must go through this in Python rather than `func.date()` in SQL."""
     return naive_utc_dt.replace(tzinfo=_UTC).astimezone(USER_TIMEZONE).date()
+
+
+def local_date_to_utc_noon(d: date) -> datetime:
+    """Return a naive-UTC datetime representing noon on day `d` in the user's timezone.
+    Used when backdating a meal entry — we don't know the actual time, so noon places it
+    safely in the middle of the day and avoids any UTC-offset edge that could shift the
+    entry to the wrong calendar day."""
+    local_noon = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=USER_TIMEZONE)
+    return local_noon.astimezone(_UTC).replace(tzinfo=None)
