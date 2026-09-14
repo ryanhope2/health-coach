@@ -323,7 +323,7 @@ in the rollup and its totals — a
 surfaces in a separate "Needs review" section above the day list instead, pulled out
 regardless of how far back its date is.
 
-Each meal-type row (`Breakfast`/`Lunch`/`Dinner`/`Snack`, fixed order via
+Each meal-type row (`Breakfast`/`Lunch`/`Dinner`/`Snack`/`Alcohol`, fixed order via
 `MEAL_TYPE_ORDER` + `_meal_type_sort_key()` — not alphabetical, which would misorder
 them — anything else/`None` sorts last as "Other") is a native `<details>/<summary>`
 disclosure, not custom JS: click to expand and see the individual entries underneath
@@ -334,6 +334,47 @@ starts collapsed to just its day-total and per-meal-type subtotals. Pagination i
 **day count, not row count** — `PAGE_DAYS = 7` distinct calendar days per page, "Show
 earlier days" reissues the page with `?before=<oldest-shown-date>` to fetch the next
 chunk further back, rather than infinite-scroll JS.
+
+**Alcohol is its own `meal_type`, not a separate model.** `"alcohol"` was added to
+`MEAL_TYPE_ORDER`/`MEAL_TYPE_LABELS` alongside breakfast/lunch/dinner/snack, since both
+columns it needs (`MealEntry.meal_type`, `SavedMeal.meal_type`) were already free-text —
+no schema change, and the day-rollup/coach-summary machinery groups it correctly for
+free. The point (per the user: drinks shouldn't get folded into "snack" just because of
+when they were drunk) is achieved entirely by omission — `guess-meal-type.js` is never
+asked to guess `"alcohol"`, so it's the one type that's always explicit, never
+clock-guessed. Calories/protein from alcohol entries are deliberately **included** in the
+same daily totals shown on the dashboard and `/meals/` (no separate "alcohol calories"
+figure) — it's still calories against the same daily budget.
+
+**Quick drinks (`/meals/quick-drinks`):** for the handful of drinks logged repeatedly
+(a vodka martini, a manhattan), presets are `SavedMeal` rows with `meal_type="alcohol"`,
+managed on their own CRUD page — same shape as `/coach/notes` (add card + editable
+list-group) — rather than only being creatable via the meal-review "save as quick meal"
+checkbox, since a drink preset is just a name + calorie count with no AI parse involved.
+`meals.index()` splits the user's saved meals into `saved_meals` (food) and
+`saved_drinks` (alcohol) so they render as two separate cards ("Quick meals" / "Quick
+drinks") instead of one mixed list. **Gotcha to preserve:** the food "Quick meals"
+buttons carry a hidden `.quick-meal-type` field that page JS stamps with
+`guessMealType()` on load, and `quick_log()` uses that form value over the saved meal's
+own `meal_type` if present — the quick-drink buttons deliberately omit that field/class
+entirely so `quick_log()`'s fallback (`sm.meal_type`) logs them as `"alcohol"` untouched;
+adding `.quick-meal-type` to a drink button would silently break the whole feature by
+re-time-guessing it.
+
+**Dashboard access:** a small "🍸 Log a drink" text link sits below `.vitals` rather than
+becoming a 6th grid cell — the 5-cell grid's `grid-template-columns`/`grid-row: span 2`
+auto-placement (see Dashboard Layout below) is tuned for exactly 5 cells in a specific
+DOM order, and a drink shortcut isn't worth re-deriving that. It opens a `quickDrinkModal`
+listing the same saved drinks as one-tap buttons. Logging one needs to return to the
+dashboard, not `/meals/` — so `quick_log()` gained the same allowlisted-redirect pattern
+`body.add_stat()` already uses (`_safe_next()` in `meals.py`, mirroring `body.py`'s): a
+hidden `next` field set to `url_for('index')` on the dashboard's forms only.
+
+The AI coach's `log_meal` tool and system prompt were updated the same way — `"alcohol"`
+added to the tool's `meal_type` enum, with an explicit instruction to use it for any
+drink regardless of time of day. `build_context_summary()` needed no change: its meal
+section only reports daily calorie/protein totals, not a per-meal-type breakdown, so
+alcohol was already folded in correctly.
 
 ---
 

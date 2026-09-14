@@ -47,7 +47,9 @@ doesn't say). For meals described in words rather than a photo, estimate calorie
 yourself using typical nutrition data and reasonable portion sizes — it's fine to be approximate, and \
 mention it's an estimate they can adjust in the Meals tab. If something is genuinely ambiguous (e.g. \
 no quantity at all, unclear which measurement they mean), ask a quick clarifying question rather than \
-guessing wildly or refusing.
+guessing wildly or refusing. Any drink (beer, wine, a cocktail, a shot) is its own category — always \
+log it with meal_type "alcohol", never breakfast/lunch/dinner/snack, no matter what time of day it \
+was.
 
 You also have a persistent memory, separate from the visible conversation: "Notes" below (if any) \
 are things you've saved about this user's health journey that stay with them forever, not just for \
@@ -101,13 +103,15 @@ TOOLS = [
     },
     {
         "name": "log_meal",
-        "description": "Log a meal the user describes in conversation. Estimate the nutrition "
-                        "yourself from the description before calling this.",
+        "description": "Log a meal (or drink) the user describes in conversation. Estimate the "
+                        "nutrition yourself from the description before calling this. Use "
+                        "meal_type 'alcohol' for any beer/wine/cocktail/liquor, regardless of "
+                        "what time of day it was, rather than breakfast/lunch/dinner/snack.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "description": {"type": "string"},
-                "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"]},
+                "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack", "alcohol"]},
                 "calories": {"type": "number"},
                 "protein_g": {"type": "number"},
                 "carbs_g": {"type": "number"},
@@ -400,7 +404,7 @@ def build_context_summary(user) -> str:
         .all()
     )
     if recent_meals:
-        lines.append("\nMeals (last 14 days):")
+        lines.append("\nMeals (last 14 days, daily totals):")
         by_day = {}
         for m in recent_meals:
             d = to_local_date(m.logged_at)
@@ -409,6 +413,21 @@ def build_context_summary(user) -> str:
             totals["protein"] += float(m.protein_g or 0)
         for d, totals in sorted(by_day.items()):
             lines.append(f"  {d}: {totals['calories']} kcal, {totals['protein']:.0f}g protein")
+
+        # Line-item detail for today only (not the full 14 days, to keep context size
+        # reasonable) — daily totals alone don't let the coach comment on what was
+        # actually eaten (e.g. low-protein breakfast, a snack that was mostly carbs).
+        todays_meals = [m for m in recent_meals if to_local_date(m.logged_at) == today]
+        if todays_meals:
+            lines.append("\nToday's meals in detail:")
+            for m in todays_meals:
+                label = (m.meal_type or "meal").capitalize()
+                desc = m.description or "(no description)"
+                lines.append(
+                    f"  [{label}] {desc} — {_fmt(m.calories, ' kcal')}, "
+                    f"{_fmt(m.protein_g, 'g protein')}, {_fmt(m.carbs_g, 'g carbs')}, "
+                    f"{_fmt(m.fat_g, 'g fat')}"
+                )
 
     recent_exercise = (
         ExerciseEntry.query.filter_by(user_id=user.id)

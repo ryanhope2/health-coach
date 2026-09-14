@@ -33,6 +33,11 @@
     </div>
   </div>
 
+  <div class="text-center mb-2">
+    <a role="button" data-bs-toggle="modal" data-bs-target="#quickDrinkModal"
+       class="small text-muted text-decoration-none">🍸 Log a drink</a>
+  </div>
+
   {% set compact = true %}
   {% include "coach/_widget.html" %}
 </div>
@@ -104,6 +109,7 @@
               <option value="lunch">Lunch</option>
               <option value="dinner">Dinner</option>
               <option value="snack">Snack</option>
+              <option value="alcohol">Alcohol</option>
             </select>
           </div>
         </div>
@@ -116,10 +122,43 @@
   </div>
 </div>
 
+<div class="modal fade" id="quickDrinkModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Log a drink</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body d-flex flex-wrap gap-2">
+        {% for sm in saved_drinks %}
+          <!-- No .quick-meal-type field: drinks must never pick up a clock-guessed
+               meal type, so quick_log() falls back to this saved meal_type (alcohol). -->
+          <form method="post" action="{{ url_for('meals.quick_log', saved_meal_id=sm.id) }}" class="guard-double-submit">
+            <input type="hidden" name="next" value="{{ url_for('index') }}">
+            <button class="btn btn-outline-success btn-sm" title="Log this now">
+              {{ sm.name }}
+              <span class="text-muted">({{ sm.calories or '?' }} kcal)</span>
+            </button>
+          </form>
+        {% else %}
+          <span class="text-muted small">
+            No quick drinks saved yet — <a href="{{ url_for('meals.quick_drinks') }}">add one</a>.
+          </span>
+        {% endfor %}
+      </div>
+      <div class="modal-footer">
+        <a href="{{ url_for('meals.quick_drinks') }}" class="small me-auto">Manage drinks</a>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/guess-meal-type.js') }}"></script>
+<script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
 <script src="{{ url_for('static', filename='js/coach-chat.js') }}"></script>
 <script>
   (function () {

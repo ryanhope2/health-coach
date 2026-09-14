@@ -15,8 +15,11 @@ meals_bp = Blueprint("meals", __name__, url_prefix="/meals")
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 PAGE_DAYS = 7
-MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner", "snack"]
-MEAL_TYPE_LABELS = {"breakfast": "Breakfast", "lunch": "Lunch", "dinner": "Dinner", "snack": "Snack"}
+MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner", "snack", "alcohol"]
+MEAL_TYPE_LABELS = {
+    "breakfast": "Breakfast", "lunch": "Lunch", "dinner": "Dinner", "snack": "Snack",
+    "alcohol": "Alcohol",
+}
 
 
 def _current_user_id():
@@ -122,11 +125,13 @@ def index():
 
     # SQLite sorts NULL first ascending / last descending, so unused saved meals
     # (last_used_at is NULL) naturally fall after ones that have been used.
-    saved_meals = (
+    all_saved = (
         SavedMeal.query.filter_by(user_id=user_id)
         .order_by(SavedMeal.last_used_at.desc(), SavedMeal.created_at.desc())
         .all()
     )
+    saved_meals = [sm for sm in all_saved if sm.meal_type != "alcohol"]
+    saved_drinks = [sm for sm in all_saved if sm.meal_type == "alcohol"]
     return render_template(
         "meals/index.html",
         pending_meals=pending_meals,
@@ -136,6 +141,7 @@ def index():
         today_calories=today_calories,
         today_protein=today_protein,
         saved_meals=saved_meals,
+        saved_drinks=saved_drinks,
     )
 
 
@@ -293,16 +299,66 @@ def quick_log(saved_meal_id):
     sm.last_used_at = datetime.utcnow()
     db.session.commit()
     flash(f'Logged "{sm.name}".', "success")
-    return redirect(url_for("meals.index"))
+    return redirect(_safe_next())
+
+
+def _safe_next():
+    """Redirect target for quick_log — allowlisted to avoid an open redirect via `next`."""
+    next_url = request.form.get("next")
+    if next_url in (url_for("index"), url_for("meals.index")):
+        return next_url
+    return url_for("meals.index")
 
 
 @meals_bp.route("/quick/<int:saved_meal_id>/delete", methods=["POST"])
 def delete_saved_meal(saved_meal_id):
     sm = SavedMeal.query.filter_by(id=saved_meal_id, user_id=_current_user_id()).first_or_404()
+    was_drink = sm.meal_type == "alcohol"
     db.session.delete(sm)
     db.session.commit()
     flash("Removed from quick meals.", "success")
-    return redirect(url_for("meals.index"))
+    return redirect(url_for("meals.quick_drinks") if was_drink else url_for("meals.index"))
+
+
+@meals_bp.route("/quick-drinks")
+def quick_drinks():
+    drinks = (
+        SavedMeal.query.filter_by(user_id=_current_user_id(), meal_type="alcohol")
+        .order_by(SavedMeal.created_at.asc())
+        .all()
+    )
+    return render_template("meals/quick_drinks.html", drinks=drinks)
+
+
+@meals_bp.route("/quick-drinks/new", methods=["POST"])
+def add_quick_drink():
+    name = request.form.get("name", "").strip()
+    calories = _parse_int(request.form.get("calories"))
+    if not name:
+        flash("Give the drink a name.", "error")
+        return redirect(url_for("meals.quick_drinks"))
+    db.session.add(SavedMeal(
+        user_id=_current_user_id(), name=name, meal_type="alcohol", calories=calories,
+    ))
+    db.session.commit()
+    flash(f'Added "{name}".', "success")
+    return redirect(url_for("meals.quick_drinks"))
+
+
+@meals_bp.route("/quick-drinks/<int:saved_meal_id>/update", methods=["POST"])
+def update_quick_drink(saved_meal_id):
+    sm = SavedMeal.query.filter_by(
+        id=saved_meal_id, user_id=_current_user_id(), meal_type="alcohol"
+    ).first_or_404()
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Give the drink a name.", "error")
+        return redirect(url_for("meals.quick_drinks"))
+    sm.name = name
+    sm.calories = _parse_int(request.form.get("calories"))
+    db.session.commit()
+    flash("Updated.", "success")
+    return redirect(url_for("meals.quick_drinks"))
 
 
 @meals_bp.route("/<int:meal_id>/delete", methods=["POST"])

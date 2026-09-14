@@ -77,7 +77,7 @@ def create_app(config=None):
 
     @app.route("/")
     def index():
-        from .models import BodyStat, ChatMessage, ExerciseEntry, MealEntry, User
+        from .models import BodyStat, ChatMessage, ExerciseEntry, MealEntry, SavedMeal, User
         from .timeutils import local_today, to_local_date
 
         user = User.query.get(session["user_id"])
@@ -198,6 +198,12 @@ def create_app(config=None):
         )
         recent_chat.reverse()
 
+        saved_drinks = (
+            SavedMeal.query.filter_by(user_id=user.id, meal_type="alcohol")
+            .order_by(SavedMeal.last_used_at.desc(), SavedMeal.created_at.desc())
+            .all()
+        )
+
         return render_template(
             "index.html",
             user=user,
@@ -211,6 +217,7 @@ def create_app(config=None):
             exercise_color=exercise_color,
             messages=recent_chat,
             today=today.isoformat(),
+            saved_drinks=saved_drinks,
         )
 
     return app

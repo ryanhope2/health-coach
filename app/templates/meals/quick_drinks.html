@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Quick drinks — Moron Fitness{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Quick drinks</h1>
+  <a href="{{ url_for('meals.index') }}" class="btn btn-sm btn-outline-secondary">Back to meals</a>
+</div>
+
+<p class="text-muted">
+  Drinks you have often, for one-tap logging on the Meals page and the dashboard — no AI
+  parsing, just a name and a calorie count. Logged as their own "Alcohol" category,
+  regardless of what time of day you log them.
+</p>
+
+<div class="card mb-4">
+  <div class="card-header">Add a drink</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('meals.add_quick_drink') }}" class="guard-double-submit">
+      <div class="row g-2">
+        <div class="col-8">
+          <label class="form-label small">Name</label>
+          <input type="text" name="name" class="form-control" placeholder="e.g. Vodka martini" required>
+        </div>
+        <div class="col-4">
+          <label class="form-label small">Calories</label>
+          <input type="number" name="calories" class="form-control" placeholder="175">
+        </div>
+      </div>
+      <button class="btn btn-success mt-3">Save</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="list-group list-group-flush">
+    {% for d in drinks %}
+      <div class="list-group-item">
+        <form method="post" action="{{ url_for('meals.update_quick_drink', saved_meal_id=d.id) }}" class="guard-double-submit">
+          <div class="row g-2 align-items-end">
+            <div class="col-8">
+              <label class="form-label small">Name</label>
+              <input type="text" name="name" class="form-control form-control-sm" value="{{ d.name }}" required>
+            </div>
+            <div class="col-4">
+              <label class="form-label small">Calories</label>
+              <input type="number" name="calories" class="form-control form-control-sm" value="{{ d.calories or '' }}">
+            </div>
+          </div>
+          <div class="mt-2">
+            <button class="btn btn-sm btn-outline-success">Save</button>
+          </div>
+        </form>
+        <form method="post" action="{{ url_for('meals.delete_saved_meal', saved_meal_id=d.id) }}"
+              onsubmit="return confirm('Remove \'{{ d.name }}\' from quick drinks?')" class="mt-1">
+          <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash me-1"></i>Delete</button>
+        </form>
+      </div>
+    {% else %}
+      <div class="list-group-item text-muted">
+        No quick drinks yet — add one above (e.g. Titos &amp; club, vodka martini, manhattan, bourbon).
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+{% endblock %}
