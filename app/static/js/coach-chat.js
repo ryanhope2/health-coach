@@ -14,12 +14,19 @@
   var input = document.getElementById('chatInput');
   var submitting = false;
 
+  function renderMarkdown(text) {
+    if (typeof marked !== 'undefined') {
+      return marked.parse(text, { breaks: true });
+    }
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   function appendBubble(role, text) {
     var emptyState = document.getElementById('chatEmptyState');
     if (emptyState) emptyState.remove();
     var div = document.createElement('div');
     div.className = 'chat-bubble ' + role;
-    div.textContent = text;
+    if (text) div.innerHTML = renderMarkdown(text);
     el.appendChild(div);
     el.scrollTop = el.scrollHeight;
     return div;
@@ -52,7 +59,7 @@
         return res.json();
       })
       .then(function (data) {
-        thinking.textContent = data.reply;
+        thinking.innerHTML = renderMarkdown(data.reply);
         thinking.classList.remove('thinking');
       })
       .catch(function () {

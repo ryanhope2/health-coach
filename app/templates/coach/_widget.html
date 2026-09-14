@@ -10,7 +10,7 @@
     </div>
     <div class="chat-messages chat-messages-compact flex-grow-1 mb-2" id="chatMessages">
       {% for m in messages %}
-        <div class="chat-bubble {{ m.role }}">{{ m.content }}</div>
+        <div class="chat-bubble {{ m.role }}" data-raw="{{ m.content | e }}">{{ m.content }}</div>
       {% else %}
         <p class="text-muted small" id="chatEmptyState">Ask your coach anything — it can see your logged weight, meals, exercise, and goals.</p>
       {% endfor %}
@@ -25,7 +25,7 @@
 <div class="card">
   <div class="card-body chat-messages" id="chatMessages">
     {% for m in messages %}
-      <div class="chat-bubble {{ m.role }}">{{ m.content }}</div>
+      <div class="chat-bubble {{ m.role }}" data-raw="{{ m.content | e }}">{{ m.content }}</div>
     {% else %}
       <p class="text-muted" id="chatEmptyState">Ask about your progress, get meal or workout suggestions, or just check in. Your coach can see your logged weight, meals, exercise, and goals.</p>
     {% endfor %}
@@ -38,3 +38,12 @@
   </div>
 </div>
 {% endif %}
+
+<script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
+<script>
+  // Re-render existing server-rendered assistant bubbles as markdown.
+  // User bubbles are plain text — don't parse those.
+  document.querySelectorAll('.chat-bubble.assistant[data-raw]').forEach(function (el) {
+    el.innerHTML = marked.parse(el.dataset.raw, { breaks: true });
+  });
+</script>

@@ -30,16 +30,31 @@ body {
   border-radius: 1rem;
   padding: .6rem 1rem;
   margin-bottom: .75rem;
-  white-space: pre-wrap;
 }
 .chat-bubble.user {
   background-color: #198754;
   color: #fff;
   margin-left: auto;
+  white-space: pre-wrap;
 }
 .chat-bubble.assistant {
   background-color: #e9ecef;
   color: #212529;
+}
+/* Tighten markdown block elements inside assistant bubbles */
+.chat-bubble.assistant p,
+.chat-bubble.assistant ul,
+.chat-bubble.assistant ol {
+  margin-bottom: .4rem;
+}
+.chat-bubble.assistant p:last-child,
+.chat-bubble.assistant ul:last-child,
+.chat-bubble.assistant ol:last-child {
+  margin-bottom: 0;
+}
+.chat-bubble.assistant ul,
+.chat-bubble.assistant ol {
+  padding-left: 1.25rem;
 }
 .chat-bubble.thinking {
   font-style: italic;
