@@ -54,6 +54,28 @@
       </div>
     </div>
   </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">Tracking period</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('goals.update_period') }}" class="row g-2 guard-double-submit">
+          <div class="col-8">
+            <label class="form-label small">Period start date</label>
+            <input type="date" name="tracking_period_start" class="form-control"
+                   value="{{ user.tracking_period_start.strftime('%Y-%m-%d') if user.tracking_period_start else '' }}">
+          </div>
+          <div class="col-4 d-flex align-items-end">
+            <button class="btn btn-outline-success w-100">Save</button>
+          </div>
+        </form>
+        <div class="form-text mt-2">
+          Sets the baseline for the weight &amp; body fat trend shown on the dashboard —
+          average of the first 7 days of logged readings from this date.
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="card">

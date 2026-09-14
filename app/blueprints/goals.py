@@ -90,6 +90,15 @@ def update_targets():
     return redirect(url_for("goals.index"))
 
 
+@goals_bp.route("/period", methods=["POST"])
+def update_period():
+    user = User.query.get(_current_user_id())
+    user.tracking_period_start = _parse_date(request.form.get("tracking_period_start"))
+    db.session.commit()
+    flash("Tracking period updated.", "success")
+    return redirect(url_for("goals.index"))
+
+
 def _parse_float(raw):
     if raw is None or raw.strip() == "":
         return None

@@ -83,27 +83,48 @@ def create_app(config=None):
         user = User.query.get(session["user_id"])
         today = local_today()
 
-        def latest_and_prior(field):
-            latest = (
+        def latest_stat(field):
+            return (
                 BodyStat.query.filter_by(user_id=user.id)
                 .filter(field.isnot(None))
                 .order_by(BodyStat.date.desc())
                 .first()
             )
-            prior = None
-            if latest:
-                prior = (
-                    BodyStat.query.filter_by(user_id=user.id)
-                    .filter(field.isnot(None), BodyStat.date < latest.date)
-                    .order_by(BodyStat.date.desc())
-                    .first()
-                )
-            return latest, prior
 
-        def trend(latest_val, prior_val):
-            if latest_val is None or prior_val is None:
+        def period_baseline(field):
+            """Average of readings in the first 7 days of user.tracking_period_start.
+            Returns None if no period is set or no readings fall in that window."""
+            if not user.tracking_period_start:
                 return None
-            diff = float(latest_val) - float(prior_val)
+            from datetime import timedelta
+            window_end = user.tracking_period_start + timedelta(days=6)
+            rows = (
+                BodyStat.query.filter_by(user_id=user.id)
+                .filter(field.isnot(None),
+                        BodyStat.date >= user.tracking_period_start,
+                        BodyStat.date <= window_end)
+                .all()
+            )
+            if not rows:
+                return None
+            return sum(float(getattr(r, field.key)) for r in rows) / len(rows)
+
+        def prior_entry_val(field, latest_row):
+            """Fallback: value from the most recent entry before the latest one."""
+            if not latest_row:
+                return None
+            prior = (
+                BodyStat.query.filter_by(user_id=user.id)
+                .filter(field.isnot(None), BodyStat.date < latest_row.date)
+                .order_by(BodyStat.date.desc())
+                .first()
+            )
+            return float(getattr(prior, field.key)) if prior else None
+
+        def trend(latest_val, baseline_val):
+            if latest_val is None or baseline_val is None:
+                return None
+            diff = float(latest_val) - float(baseline_val)
             if diff == 0:
                 return None
             return {
@@ -112,15 +133,19 @@ def create_app(config=None):
                 "css": "text-danger" if diff > 0 else "text-success",
             }
 
-        latest_weight, prior_weight = latest_and_prior(BodyStat.weight_lbs)
-        latest_bf, prior_bf = latest_and_prior(BodyStat.body_fat_pct)
+        latest_weight = latest_stat(BodyStat.weight_lbs)
+        latest_bf = latest_stat(BodyStat.body_fat_pct)
+
+        weight_baseline = period_baseline(BodyStat.weight_lbs) or prior_entry_val(BodyStat.weight_lbs, latest_weight)
+        bf_baseline = period_baseline(BodyStat.body_fat_pct) or prior_entry_val(BodyStat.body_fat_pct, latest_bf)
+
         weight_trend = trend(
-            latest_weight.weight_lbs if latest_weight else None,
-            prior_weight.weight_lbs if prior_weight else None,
+            float(latest_weight.weight_lbs) if latest_weight else None,
+            weight_baseline,
         )
         bf_trend = trend(
-            latest_bf.body_fat_pct if latest_bf else None,
-            prior_bf.body_fat_pct if prior_bf else None,
+            float(latest_bf.body_fat_pct) if latest_bf else None,
+            bf_baseline,
         )
 
         # logged_at is stored as an absolute UTC instant; a loose UTC-day bound narrows

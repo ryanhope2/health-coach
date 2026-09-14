@@ -30,6 +30,7 @@ class User(db.Model):
     display_name = db.Column(db.String(100))
     daily_calorie_target = db.Column(db.Integer, nullable=True)
     daily_protein_target_g = db.Column(db.Numeric(5, 1), nullable=True)
+    tracking_period_start = db.Column(db.Date, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     body_stats = db.relationship("BodyStat", back_populates="user", cascade="all, delete-orphan")
