@@ -1,9 +1,10 @@
-from datetime import date, datetime
+from datetime import datetime
 
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 
 from ..extensions import db
 from ..models import MEASUREMENT_METRICS, BodyStat, Measurement
+from ..timeutils import local_today
 
 body_bp = Blueprint("body", __name__, url_prefix="/body")
 
@@ -25,14 +26,14 @@ def index():
         stats=stats,
         measurements_by_metric=measurements_by_metric,
         metrics=MEASUREMENT_METRICS,
-        today=date.today().isoformat(),
+        today=local_today().isoformat(),
     )
 
 
 @body_bp.route("/stat", methods=["POST"])
 def add_stat():
     user_id = _current_user_id()
-    entry_date = _parse_date(request.form.get("date")) or date.today()
+    entry_date = _parse_date(request.form.get("date")) or local_today()
     weight = _parse_float(request.form.get("weight_lbs"))
     body_fat = _parse_float(request.form.get("body_fat_pct"))
     notes = request.form.get("notes", "").strip() or None
@@ -89,7 +90,7 @@ def add_measurement():
         flash("Enter a value.", "error")
         return redirect(url_for("body.index"))
 
-    entry_date = _parse_date(request.form.get("date")) or date.today()
+    entry_date = _parse_date(request.form.get("date")) or local_today()
     notes = request.form.get("notes", "").strip() or None
 
     db.session.add(Measurement(

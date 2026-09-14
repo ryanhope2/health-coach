@@ -4,18 +4,14 @@ logged history (body stats, measurements, meals, exercise, goals), and tool
 access to actually log new entries on the user's behalf — not just advise.
 """
 import json
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 
 import anthropic
 
+from .timeutils import local_now, local_today, to_local_date
+
 CHAT_MODEL = "claude-sonnet-4-5"
 MAX_TOOL_ROUNDS = 5
-
-# The server runs in UTC; the user is in US Eastern unless traveling. This is a fixed
-# assumption for now rather than a stored per-user setting — revisit if travel-driven
-# timezone changes turn out to matter often enough to be worth tracking properly.
-USER_TIMEZONE = ZoneInfo("America/New_York")
 
 SYSTEM_PROMPT = """You are a supportive, knowledgeable fitness and nutrition coach embedded in a \
 personal health tracker. You have access to the user's recent logged data, shown below, and tools \
@@ -197,7 +193,7 @@ def _parse_date_or_today(raw):
             return datetime.strptime(raw, "%Y-%m-%d").date()
         except ValueError:
             pass
-    return date.today()
+    return local_today()
 
 
 def _latest_value(user_id, goal_type):
@@ -348,8 +344,8 @@ def build_context_summary(user) -> str:
     """Summarize the user's recent data for the system prompt."""
     from .models import BodyStat, CoachNote, ExerciseEntry, Goal, MealEntry, Measurement
 
-    today = date.today()
-    now_local = datetime.now(USER_TIMEZONE)
+    today = local_today()
+    now_local = local_now()
     # Sunday-Saturday calendar week containing today, computed here rather than left for the
     # model to derive from the day name — day-of-week arithmetic is an easy thing to get subtly
     # wrong, and getting it wrong means blending in last week's days or crediting future ones.
@@ -407,7 +403,7 @@ def build_context_summary(user) -> str:
         lines.append("\nMeals (last 14 days):")
         by_day = {}
         for m in recent_meals:
-            d = m.logged_at.date()
+            d = to_local_date(m.logged_at)
             totals = by_day.setdefault(d, {"calories": 0, "protein": 0})
             totals["calories"] += m.calories or 0
             totals["protein"] += float(m.protein_g or 0)

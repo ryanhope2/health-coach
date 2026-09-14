@@ -1,9 +1,10 @@
-from datetime import date, datetime
+from datetime import datetime
 
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 
 from ..extensions import db
 from ..models import ExerciseEntry
+from ..timeutils import local_today
 
 exercise_bp = Blueprint("exercise", __name__, url_prefix="/exercise")
 
@@ -20,7 +21,7 @@ def index():
         .limit(90)
         .all()
     )
-    return render_template("exercise/index.html", entries=entries, today=date.today().isoformat())
+    return render_template("exercise/index.html", entries=entries, today=local_today().isoformat())
 
 
 @exercise_bp.route("/new", methods=["POST"])
@@ -30,7 +31,7 @@ def new():
         flash("Enter an activity.", "error")
         return redirect(url_for("exercise.index"))
 
-    entry_date = _parse_date(request.form.get("date")) or date.today()
+    entry_date = _parse_date(request.form.get("date")) or local_today()
     duration = _parse_int(request.form.get("duration_min"))
     calories_burned = _parse_int(request.form.get("calories_burned"))
     notes = request.form.get("notes", "").strip() or None

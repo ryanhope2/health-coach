@@ -51,6 +51,7 @@ Flask app  (wsgi.py → app/__init__.py)
 | `app/models.py` | All SQLAlchemy models |
 | `app/meal_ai.py` | Claude Vision + text nutrition estimation for meals |
 | `app/ai_coach.py` | AI coach: builds a context summary from logged data, calls Claude |
+| `app/timeutils.py` | `USER_TIMEZONE` + local-time/local-date helpers used everywhere "today" or a day boundary matters |
 | `app/blueprints/body.py` | Weight, body fat %, and measurements (waist/hips/chest/bicep/thigh) |
 | `app/blueprints/meals.py` | Log a meal (photo/text/quick-repeat), AI parse, review/confirm, history |
 | `app/blueprints/exercise.py` | Simple activity log (type, duration, notes) |
@@ -310,12 +311,14 @@ list (one row per `MealEntry`, photo thumbnail, full description, individually) 
 noisy fast — logging a meal as 3-4 separate items (e.g. eggs, toast, coffee all tagged
 "breakfast") produced 3-4 rows for what's conceptually one meal, and the AI's full
 description text plus a thumbnail was more detail than useful at a glance. Grouping is
-done entirely in Python in `meals.index()` — no schema change — via two queries: first
-`func.date(MealEntry.logged_at)` distinct + `.limit(PAGE_DAYS + 1)` to find which
-calendar days to show (the `+1` is a peek to know if there's an earlier day, i.e.
-`has_more`), then one query for every entry across that day range, bucketed in Python
-first by day (`e.logged_at.date().isoformat()`) then by `meal_type` within each day.
-Only `status == "confirmed"` entries are included in the rollup and its totals — a
+done entirely in Python in `meals.index()` — no schema change — by loading the user's
+confirmed meals and bucketing them by `to_local_date(e.logged_at)` (see Timezone
+Handling below), then by `meal_type` within each day. `has_more`/pagination is computed
+by slicing the resulting sorted list of days (`PAGE_DAYS` at a time), not via a separate
+SQL query — day-grouping has to happen in Python already (SQLite can't do timezone-aware
+date truncation), so pagination rides along on the same in-memory grouping rather than
+needing its own `func.date()` query. Only `status == "confirmed"` entries are included
+in the rollup and its totals — a
 `MealEntry` still awaiting AI-parse confirmation doesn't have a "real" number yet, so it
 surfaces in a separate "Needs review" section above the day list instead, pulled out
 regardless of how far back its date is.
@@ -332,15 +335,64 @@ starts collapsed to just its day-total and per-meal-type subtotals. Pagination i
 earlier days" reissues the page with `?before=<oldest-shown-date>` to fetch the next
 chunk further back, rather than infinite-scroll JS.
 
-Day/meal-type grouping uses `func.date()` on the naive-UTC `logged_at` column, i.e. the
-same UTC calendar-day boundary the rest of the app already uses for "today" (dashboard
-cards, `body`/`exercise` default dates) — consciously chosen over converting to
-`USER_TIMEZONE` (see AI Coach below) specifically so this page's day boundaries stay
-consistent with those other UTC-based ones instead of introducing a second, different
-definition of "today" that could disagree with itself elsewhere on the same day. This is
-still a latent app-wide inconsistency (a meal logged at 8pm Eastern is already "tomorrow"
-in UTC) worth fixing everywhere at once if it ever causes a visibly wrong day grouping,
-but out of scope for this pass.
+---
+
+## Timezone Handling (`app/timeutils.py`)
+
+Every column that stores a timestamp used for day-boundary logic (`MealEntry.logged_at`,
+`BodyStat.date`, `Measurement.date`, `ExerciseEntry.date`) is written in UTC — either a
+naive-UTC `DateTime` (`logged_at`, via `datetime.utcnow()`) or a `Date` defaulted from
+`date.today()` (also UTC-relative on this server). But the user is in US Eastern, which
+is far enough behind UTC that this used to produce a real, user-visible bug: a meal
+logged in the evening Eastern could already be "tomorrow" in UTC, so it landed under the
+wrong day everywhere that turned `logged_at` into a calendar day — the dashboard's
+today's-calories widget, the `/meals/` day rollup, and the AI coach's own meal summary.
+Reported directly: a dinner logged after local midnight (UTC) but still evening Eastern
+showed up under the wrong day.
+
+`app/timeutils.py` is the single place this gets fixed: `USER_TIMEZONE` (moved here from
+`ai_coach.py`), `local_now()`/`local_today()` for "what time/day is it right now," and
+`to_local_date(naive_utc_dt)` to convert a stored UTC timestamp to the Eastern calendar
+day it actually falls on. Every place in the app that used to call `date.today()` for
+day-boundary purposes (`app/__init__.py`'s dashboard route, `body.py`, `exercise.py`,
+`ai_coach.py`'s date fallback and context builder, and the `BodyStat`/`Measurement`/
+`ExerciseEntry` model column defaults) now goes through `local_today()` instead, and
+every place that turned a `MealEntry.logged_at` into a day (`meals.py`'s rollup,
+`ai_coach.py`'s meal-summary grouping, the dashboard's today-calories filter) goes
+through `to_local_date()`.
+
+**Why this couldn't stay a SQL-level fix:** SQLite's `func.date()` has no timezone
+awareness — it truncates the literal stored string, which is naive UTC. There's no
+`func.date(col, 'localtime')` equivalent that knows about `America/New_York`'s DST
+transitions. So `meals.index()`'s day-grouping/pagination, which used to run as
+`func.date(MealEntry.logged_at)` SQL queries, was rewritten to load the user's confirmed
+meals and group them in Python via `to_local_date()` instead — see Meal Logging Flow
+above. For a personal-scale dataset this is a non-issue perf-wise; it just means the
+day-truncation step moved from SQL to Python rather than getting more complicated SQL.
+
+**A bound-comparison gotcha hit while building this fix:** the dashboard's today's-meals
+filter originally used a loose upper bound of `MealEntry.logged_at <= today + timedelta
+(days=1)` to narrow the query before the exact `to_local_date()` check. Comparing a
+`DateTime` column to a bare `date` value in SQLite is a *lexicographic string*
+comparison, and a full timestamp is never `<=` a bare date string once its time
+component is nonzero — e.g. `"2026-09-14 02:00:00" <= "2026-09-14"` is **false** (the
+longer string, being an extension of the shorter one, sorts after it). That silently
+excluded exactly the meals the whole fix was meant to include (ones logged just after
+UTC midnight). Fixed by building the loose bounds as full `datetime` values via
+`datetime.combine(d, datetime.min.time())` instead of comparing bare dates against a
+`DateTime` column. Caught by directly comparing the dashboard's and `/meals/`'s today
+totals against each other in production before considering the fix done — they should
+always agree exactly, and initially didn't.
+
+**No data migration was needed.** Every affected UTC timestamp was already a correct
+absolute instant — only the *read-side* logic that turned it into a calendar day was
+wrong. Existing historical rows self-correct to the right day the moment the code
+re-derives their local date, with nothing to backfill.
+
+**Left alone, deliberately:** audit-only timestamps (`created_at`, `updated_at`,
+`achieved_at`, `SavedMeal.last_used_at`) still use `datetime.utcnow()` — they're never
+used for day-boundary comparisons (only sort order, which is timezone-invariant), and
+storing a pure audit stamp in UTC is the right call regardless of the user's timezone.
 
 ---
 
@@ -351,9 +403,9 @@ language logging path for the whole app (e.g. "my weight is 234.5, body fat 19%"
 turkey sandwich for lunch", "set my weight goal to 210").
 
 Each turn, `ai_coach.build_context_summary()` pulls:
-- **current date/time**, always first, in `USER_TIMEZONE` (`America/New_York`, hardcoded
-  — fixed assumption per the user, not a stored setting, since travel is the stated
-  exception rather than the common case)
+- **current date/time**, always first, in `USER_TIMEZONE` (`America/New_York`, defined in
+  `app/timeutils.py` — see Timezone Handling above — hardcoded rather than a stored
+  setting, since travel is the stated exception rather than the common case)
 - last 60 days of weight/body fat
 - last 90 days of measurements
 - last 14 days of meals (confirmed only), rolled up to daily calorie/protein totals
@@ -368,7 +420,7 @@ the coach's advice in actual numbers rather than generic guidance.
 notion of the user's local day boundary, and before this the coach had no time signal at
 all — confirmed by a real conversation where it couldn't tell whether a new day had
 started, asked the user "what's today's date?", and still ended up logging a duplicate
-exercise entry from the confusion. `now_local = datetime.now(USER_TIMEZONE)` is computed
+exercise entry from the confusion. `now_local = local_now()` is computed
 fresh on every call (not cached, not the conversation's start time), formatted as e.g.
 "Friday, September 11, 2026 at 8:41 AM EDT" (`%Z` via `zoneinfo` correctly resolves
 EST/EDT across the DST boundary; `%A` gives the day name). The system prompt tells the

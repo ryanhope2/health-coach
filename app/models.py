@@ -1,7 +1,8 @@
 import re
-from datetime import date, datetime
+from datetime import datetime
 
 from .extensions import db
+from .timeutils import local_today
 
 MEASUREMENT_METRICS = ["waist", "hips", "chest", "bicep", "thigh"]
 GOAL_TYPES = ["weight", "body_fat_pct"] + MEASUREMENT_METRICS
@@ -52,7 +53,7 @@ class BodyStat(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    date = db.Column(db.Date, nullable=False, default=date.today)
+    date = db.Column(db.Date, nullable=False, default=local_today)
     weight_lbs = db.Column(db.Numeric(5, 1), nullable=True)
     body_fat_pct = db.Column(db.Numeric(4, 1), nullable=True)
     notes = db.Column(db.Text)
@@ -67,7 +68,7 @@ class Measurement(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    date = db.Column(db.Date, nullable=False, default=date.today)
+    date = db.Column(db.Date, nullable=False, default=local_today)
     metric = db.Column(db.String(20), nullable=False)  # one of MEASUREMENT_METRICS
     value_in = db.Column(db.Numeric(5, 1), nullable=False)
     notes = db.Column(db.Text)
@@ -144,7 +145,7 @@ class ExerciseEntry(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    date = db.Column(db.Date, nullable=False, default=date.today)
+    date = db.Column(db.Date, nullable=False, default=local_today)
     activity = db.Column(db.String(100), nullable=False)
     duration_min = db.Column(db.Integer)
     calories_burned = db.Column(db.Integer, nullable=True)

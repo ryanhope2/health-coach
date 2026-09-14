@@ -1,5 +1,5 @@
 import os
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 
 from flask import Flask, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
@@ -78,9 +78,10 @@ def create_app(config=None):
     @app.route("/")
     def index():
         from .models import BodyStat, ChatMessage, ExerciseEntry, MealEntry, User
+        from .timeutils import local_today, to_local_date
 
         user = User.query.get(session["user_id"])
-        today = date.today()
+        today = local_today()
 
         def latest_and_prior(field):
             latest = (
@@ -122,11 +123,23 @@ def create_app(config=None):
             prior_bf.body_fat_pct if prior_bf else None,
         )
 
-        todays_meals = (
+        # logged_at is stored as an absolute UTC instant; a loose UTC-day bound narrows
+        # the query, then to_local_date() does the actual (timezone-correct) day check —
+        # SQLite's func.date() would truncate the raw UTC value instead of the local day.
+        # The bound must be full datetimes, not bare dates: comparing a DateTime column
+        # against a plain date string in SQLite is a lexicographic string comparison, so
+        # e.g. "2026-09-14 02:00:00" <= "2026-09-14" is FALSE (the longer string sorts
+        # after its own prefix) — that upper bound would silently exclude everything
+        # after exact midnight on the boundary date.
+        loose_lower = datetime.combine(today - timedelta(days=1), datetime.min.time())
+        loose_upper = datetime.combine(today + timedelta(days=2), datetime.min.time())
+        todays_meals = [
+            m for m in
             MealEntry.query.filter_by(user_id=user.id, status="confirmed")
-            .filter(MealEntry.logged_at >= today)
+            .filter(MealEntry.logged_at >= loose_lower, MealEntry.logged_at < loose_upper)
             .all()
-        )
+            if to_local_date(m.logged_at) == today
+        ]
         today_calories = sum(m.calories or 0 for m in todays_meals)
         today_protein = sum(float(m.protein_g or 0) for m in todays_meals)
 

@@ -1,14 +1,14 @@
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import (Blueprint, current_app, flash, jsonify, redirect, render_template,
                     request, send_file, session, url_for)
-from sqlalchemy import func
 
 from ..extensions import db
 from ..meal_ai import parse_meal
 from ..models import FoodItem, MealEntry, SavedMeal
+from ..timeutils import local_today, to_local_date
 
 meals_bp = Blueprint("meals", __name__, url_prefix="/meals")
 
@@ -34,18 +34,18 @@ def _meal_type_label(meal_type):
     return MEAL_TYPE_LABELS.get(meal_type, "Other")
 
 
-def _day_label(day_str, today_str, yesterday_str):
-    if day_str == today_str:
+def _day_label(day, today, yesterday):
+    if day == today:
         return "Today"
-    if day_str == yesterday_str:
+    if day == yesterday:
         return "Yesterday"
-    return datetime.strptime(day_str, "%Y-%m-%d").strftime("%A, %B %-d")
+    return day.strftime("%A, %B %-d")
 
 
 @meals_bp.route("/")
 def index():
     user_id = _current_user_id()
-    today = date.today()
+    today = local_today()
 
     pending_meals = (
         MealEntry.query.filter_by(user_id=user_id, status="pending")
@@ -53,70 +53,56 @@ def index():
         .all()
     )
 
-    todays_confirmed = (
+    # logged_at is stored as an absolute UTC instant. SQLite has no timezone-aware date
+    # truncation, so day-grouping happens here in Python via to_local_date() rather than
+    # func.date() in SQL — func.date() would truncate the raw UTC value, landing a meal
+    # logged near midnight Eastern on the wrong calendar day.
+    confirmed = (
         MealEntry.query.filter_by(user_id=user_id, status="confirmed")
-        .filter(func.date(MealEntry.logged_at) == today.isoformat())
+        .order_by(MealEntry.logged_at.asc())
         .all()
     )
+    by_day = {}
+    for e in confirmed:
+        by_day.setdefault(to_local_date(e.logged_at), []).append(e)
+
+    todays_confirmed = by_day.get(today, [])
     today_calories = sum(m.calories or 0 for m in todays_confirmed)
     today_protein = sum(float(m.protein_g or 0) for m in todays_confirmed)
 
-    # Day-based pagination: find which calendar days (not rows) to show, then
-    # pull every entry within that day range. `before` (a YYYY-MM-DD string)
-    # pages further back in time via "Show earlier days".
+    # Day-based pagination: find which calendar days (not rows) to show. `before` (a
+    # YYYY-MM-DD string) pages further back in time via "Show earlier days".
     before = request.args.get("before")
-    day_query = (
-        db.session.query(func.date(MealEntry.logged_at))
-        .filter(MealEntry.user_id == user_id, MealEntry.status == "confirmed")
-    )
-    if before:
-        day_query = day_query.filter(func.date(MealEntry.logged_at) < before)
-    distinct_days = [
-        row[0] for row in
-        day_query.distinct().order_by(func.date(MealEntry.logged_at).desc()).limit(PAGE_DAYS + 1).all()
-    ]
-    has_more = len(distinct_days) > PAGE_DAYS
-    shown_days = distinct_days[:PAGE_DAYS]
+    before_date = datetime.strptime(before, "%Y-%m-%d").date() if before else None
+    all_days_desc = sorted(by_day.keys(), reverse=True)
+    if before_date:
+        all_days_desc = [d for d in all_days_desc if d < before_date]
+    has_more = len(all_days_desc) > PAGE_DAYS
+    shown_days = all_days_desc[:PAGE_DAYS]
 
     days = []
-    if shown_days:
-        entries = (
-            MealEntry.query.filter(
-                MealEntry.user_id == user_id,
-                MealEntry.status == "confirmed",
-                func.date(MealEntry.logged_at) >= shown_days[-1],
-                func.date(MealEntry.logged_at) <= shown_days[0],
-            )
-            .order_by(MealEntry.logged_at.asc())
-            .all()
-        )
-        by_day = {}
-        for e in entries:
-            by_day.setdefault(e.logged_at.date().isoformat(), []).append(e)
-
-        today_str = today.isoformat()
-        yesterday_str = (today - timedelta(days=1)).isoformat()
-        for day_str in shown_days:
-            day_entries = by_day.get(day_str, [])
-            by_type = {}
-            for e in day_entries:
-                by_type.setdefault(e.meal_type, []).append(e)
-            meal_groups = [
-                {
-                    "label": _meal_type_label(mt),
-                    "entries": group_entries,
-                    "calories": sum(x.calories or 0 for x in group_entries),
-                    "protein": sum(float(x.protein_g or 0) for x in group_entries),
-                }
-                for mt, group_entries in sorted(by_type.items(), key=lambda kv: _meal_type_sort_key(kv[0]))
-            ]
-            days.append({
-                "label": _day_label(day_str, today_str, yesterday_str),
-                "is_today": day_str == today_str,
-                "calories": sum(x.calories or 0 for x in day_entries),
-                "protein": sum(float(x.protein_g or 0) for x in day_entries),
-                "meal_groups": meal_groups,
-            })
+    yesterday = today - timedelta(days=1)
+    for d in shown_days:
+        day_entries = by_day.get(d, [])
+        by_type = {}
+        for e in day_entries:
+            by_type.setdefault(e.meal_type, []).append(e)
+        meal_groups = [
+            {
+                "label": _meal_type_label(mt),
+                "entries": group_entries,
+                "calories": sum(x.calories or 0 for x in group_entries),
+                "protein": sum(float(x.protein_g or 0) for x in group_entries),
+            }
+            for mt, group_entries in sorted(by_type.items(), key=lambda kv: _meal_type_sort_key(kv[0]))
+        ]
+        days.append({
+            "label": _day_label(d, today, yesterday),
+            "is_today": d == today,
+            "calories": sum(x.calories or 0 for x in day_entries),
+            "protein": sum(float(x.protein_g or 0) for x in day_entries),
+            "meal_groups": meal_groups,
+        })
 
     # SQLite sorts NULL first ascending / last descending, so unused saved meals
     # (last_used_at is NULL) naturally fall after ones that have been used.
@@ -130,7 +116,7 @@ def index():
         pending_meals=pending_meals,
         days=days,
         has_more=has_more,
-        next_before=shown_days[-1] if (has_more and shown_days) else None,
+        next_before=shown_days[-1].isoformat() if (has_more and shown_days) else None,
         today_calories=today_calories,
         today_protein=today_protein,
         saved_meals=saved_meals,
