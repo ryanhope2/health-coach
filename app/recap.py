@@ -4,7 +4,6 @@ the Progress page shows (computed by app/progress.py and handed to the model, ne
 re-derived by it) plus the context that explains them — CoachNotes, what was actually
 eaten, the workouts, and that week's coach chat.
 """
-import json
 from datetime import datetime, timedelta
 
 import anthropic
@@ -16,20 +15,22 @@ from .models import ChatMessage, CoachNote, ExerciseEntry, Goal, MealEntry, Week
 from .timeutils import local_today, to_local_date
 
 PRIOR_WEEKS = 3
+MAX_RECAP_WORDS = 140  # prompt asks for 130; one tightening pass if the model overshoots
 MAX_CHAT_MESSAGES = 60
 MAX_CHAT_CHARS = 400
 
 RECAP_PROMPT = """You write the weekly recap on a personal fitness tracker's Progress page. The \
 person reads it to see how their week actually went against their goals.
 
-Return ONLY a JSON object with two fields:
+Call the save_recap tool with two fields:
 - "headline": at most 35 words, 1-2 sentences. The week's verdict in the fewest words: the \
 biggest win, the biggest miss, where they stand on goal pace, then "Focus:" and the one thing to \
 do next. Fragments are fine.
-- "recap": at most 130 words of plain prose, second person ("you"), no headings, bullets, or \
+- "recap": a hard limit of 5 sentences and 130 words — it's read on a phone, so going over \
+is a failure even if every sentence is relevant. Plain prose, second person ("you"), no headings, bullets, or \
 markdown. Cover what went well, what slipped, and goal pace, and use the notes, meals, workouts, \
 and chat to explain *why* the week looked the way it did (travel, an event, an injury) — name \
-the specific days and meals behind a miss. End with "Focus:" and one concrete, specific thing to \
+the specific days and meals behind a miss, but pick only the one or two that mattered most. End with "Focus:" and one concrete, specific thing to \
 do next week. Every sentence should carry a number or a specific fact; cut filler and \
 transitions ("The pattern behind the overages is readable") entirely.
 
@@ -39,6 +40,19 @@ lists are only for explaining why. Be direct and honest, not a cheerleader: no e
 points, no generic praise.{in_progress}
 
 {data}"""
+
+RECAP_TOOL = {
+    "name": "save_recap",
+    "description": "Save the weekly recap shown on the Progress page.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {"type": "string", "description": "At most 35 words, 1-2 sentences, ending with 'Focus: ...'"},
+            "recap": {"type": "string", "description": "At most 5 sentences and 130 words of plain prose, ending with 'Focus: ...'"},
+        },
+        "required": ["headline", "recap"],
+    },
+}
 
 IN_PROGRESS_NOTE = """
 
@@ -55,7 +69,10 @@ def _week_line(w, cap):
         f"calories avg {_fmt(w['calories_avg'])} over {w['meal_days']} logged day(s), "
         f"{w['calories_in_range']} of {w['meal_days']} at or under {cap or 'n/a'}; "
         f"protein avg {_fmt(w['protein_avg'], suffix='g')}, target hit {w['protein_hit']} day(s); "
-        f"drinks {w['drinks']:g} on {w['drinking_days']} day(s) ({w['drink_calories']} kcal); "
+        f"drinks {w['drinks']:g} on {w['drinking_days']} day(s) ({w['drink_calories']} kcal)"
+        + (f", most in one day {peak['drinks']:g} ({peak['date']:%a})" if (peak := max(
+            w["days"], key=lambda d: d["drinks"], default=None)) and peak["drinks"] else "")
+        + "; "
         f"exercise {w['exercise_days']} day(s) ({w['cardio_days']} cardio, {w['strength_days']} strength); "
         f"weight avg {_fmt(w['weight_avg'], '.1f')}, body fat avg {_fmt(w['body_fat_avg'], '.1f', '%')}"
     )
@@ -154,11 +171,33 @@ def generate_recap(api_key, user, period, wk_start, as_of=None):
     )
 
     client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model=CHAT_MODEL, max_tokens=600, messages=[{"role": "user", "content": prompt}],
+    # A forced tool call rather than "return JSON" in the prompt: asked for plain JSON, the
+    # model once wrapped it in a code fence with a trailing comma, and the raw reply ended
+    # up on the page. A tool schema makes the structure the API's job.
+    messages = [{"role": "user", "content": prompt}]
+    call = lambda: client.messages.create(  # noqa: E731
+        model=CHAT_MODEL, max_tokens=1000, messages=messages,
+        tools=[RECAP_TOOL], tool_choice={"type": "tool", "name": RECAP_TOOL["name"]},
     )
-    raw = "".join(b.text for b in response.content if b.type == "text").strip()
-    headline, content = _parse_recap(raw)
+    response = call()
+    headline, content = _parse_recap(response)
+
+    # Word limits in the prompt alone don't hold — the model reliably writes 170-200 words
+    # when asked for 130 — but it's good at compressing its own draft when shown the count.
+    words = len(content.split())
+    if words > MAX_RECAP_WORDS:
+        tool_use = next(b for b in response.content if b.type == "tool_use")
+        messages += [
+            {"role": "assistant", "content": response.content},
+            {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": tool_use.id, "is_error": True,
+                "content": f"The recap is {words} words; the limit is 130. Call save_recap again with "
+                           "the recap rewritten to 130 words or fewer: keep every number and the "
+                           "specific days/meals, cut phrasing and the least important detail. Keep "
+                           "the headline as is unless it's over 35 words.",
+            }]},
+        ]
+        headline, content = _parse_recap(call())
 
     recap = WeeklyRecap.query.filter_by(user_id=user.id, week_start=wk_start).first()
     if recap is None:
@@ -172,18 +211,15 @@ def generate_recap(api_key, user, period, wk_start, as_of=None):
     return recap
 
 
-def _parse_recap(raw):
-    """(headline, full recap) from the model's JSON reply. If it didn't return valid JSON,
-    keep the whole reply as the full recap and use its first sentence as the headline
-    rather than losing the recap."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
-    try:
-        data = json.loads(text)
-        return data["headline"].strip(), data["recap"].strip()
-    except (ValueError, KeyError, TypeError, AttributeError):
-        return raw.split(". ", 1)[0].rstrip(".") + ".", raw
+def _parse_recap(response):
+    """(headline, full recap) from the save_recap tool call."""
+    for block in response.content:
+        if block.type == "tool_use" and block.name == RECAP_TOOL["name"]:
+            headline = (block.input.get("headline") or "").strip()
+            recap = (block.input.get("recap") or "").strip()
+            if recap:
+                return headline or None, recap
+    raise ValueError("The model didn't return a recap.")
 
 
 def latest_recap(user_id):

@@ -300,10 +300,16 @@ use identical code). Sections, top to bottom:
   was a single ~280-word paragraph that pushed the weight chart below the fold; the user
   liked every insight in it, so the fix was compression (every sentence must carry a number
   or specific fact, no filler) plus a short/long split — not dropping content or moving the
-  recap to the bottom of the page. `_parse_recap()` falls back to first-sentence-as-headline
-  if the reply isn't valid JSON, rather than losing the recap. The prompt also forbids
+  recap to the bottom of the page. Output comes through a **forced `save_recap` tool call**, not "return JSON" in the prompt —
+  asked for plain JSON, the model once wrapped it in a code fence with a trailing comma and
+  the raw text landed on the page. **Word limits in the prompt don't hold on their own**
+  (it reliably wrote 170-200 words when asked for 130), so if the recap exceeds
+  `MAX_RECAP_WORDS` the code replies with a tool error stating the count and asks for a
+  rewrite — compressing its own draft is something the model does well. The prompt also forbids
   counting from the raw meal/workout lists (only the given summary numbers) — the first
-  recap re-counted workouts itself and called a Disney walking day a Peloton ride.
+  recap re-counted workouts itself and called a Disney walking day a Peloton ride — and the
+  data includes derived facts the model would otherwise misread, like the week's peak
+  drinking day (it once claimed "no night over 2" for a week with a 4-drink Sunday).
 - **Weight card** — start = first-week average, now = 7-day average, goal = the period's
   active weight goal. Pace status compares the 7-day average against the straight
   baseline→target line **at the midpoint of the readings being averaged**, not today (a
