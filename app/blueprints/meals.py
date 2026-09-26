@@ -179,9 +179,13 @@ def new():
     if not description and not photo_path:
         return fail("Add a description or a photo (or both).")
 
+    # A drink count typed on the form wins over the AI's estimate (applied after parsing).
+    typed_drinks = _parse_float(request.form.get("drinks")) if meal_type == "alcohol" else None
+
     meal_kwargs = dict(
         user_id=_current_user_id(),
         meal_type=meal_type,
+        drinks=typed_drinks,
         description=description,
         photo_path=photo_path,
         status="pending",
@@ -214,7 +218,7 @@ def new():
     meal.protein_g = result.get("total_protein_g")
     meal.carbs_g = result.get("total_carbs_g")
     meal.fat_g = result.get("total_fat_g")
-    meal.drinks = result.get("drinks") or None
+    meal.drinks = typed_drinks or result.get("drinks") or None
     meal.ai_raw_response = result.get("_raw_text")
     for item in result.get("items", []):
         db.session.add(FoodItem(

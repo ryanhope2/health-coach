@@ -36,6 +36,11 @@
           <label class="form-label">Date</label>
           <input type="date" name="logged_date" id="mealDate" class="form-control">
         </div>
+        <div class="col-6" id="mealDrinksField" hidden>
+          <label class="form-label">Drinks</label>
+          <input type="number" step="0.5" min="0.5" name="drinks" id="mealDrinks" class="form-control" placeholder="e.g. 2">
+          <div class="form-text">Leave blank to let the AI count them</div>
+        </div>
       </div>
       <button type="submit" class="btn btn-success" id="mealSubmitBtn"><i class="bi bi-stars me-1"></i>Estimate with AI</button>
       <a href="{{ url_for('meals.index') }}" class="btn btn-outline-secondary" id="mealCancelLink">Cancel</a>
@@ -50,6 +55,9 @@
 <script src="{{ url_for('static', filename='js/guess-meal-type.js') }}"></script>
 <script>
   document.getElementById('mealType').value = guessMealType();
+  document.getElementById('mealType').addEventListener('change', function (e) {
+    document.getElementById('mealDrinksField').hidden = e.target.value !== 'alcohol';
+  });
 
   (function () {
     var d = new Date();
