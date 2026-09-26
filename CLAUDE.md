@@ -58,6 +58,7 @@ Flask app  (wsgi.py → app/__init__.py)
 | `app/blueprints/exercise.py` | Simple activity log (type, duration, notes) |
 | `app/blueprints/goals.py` | Targets for weight/body-fat/measurements + daily calorie/protein targets |
 | `app/blueprints/coach.py` | AI coach chat + `/coach/notes` CRUD for persistent memory |
+| `migrate_exercise.py` | One-time (re-runnable) migration adding the structured exercise columns |
 | `migrate_periods.py` | One-time (re-runnable) migration: `tracking_periods` table, `goals.period_id`, `meal_entries.drinks`, seeds the first period from the old `User` columns |
 | `init_db.py` | Create tables, seed the first user from `AUTH_USERNAME`/`AUTH_PASSWORD` |
 | `manage.py` | CLI to add a user / reset a password / list users (no UI for this yet) |
@@ -95,7 +96,11 @@ Flask app  (wsgi.py → app/__init__.py)
 - **FoodItem** — individual food items within a meal, as parsed/edited
 - **SavedMeal** — a reusable meal template (name + nutrition) for one-tap re-logging of
   meals eaten repeatedly; not itself a logged meal, see Meal Logging Flow below
-- **ExerciseEntry** — activity, duration, optional calories burned, free-text notes
+- **ExerciseEntry** — activity + `exercise_type`, which decides which fields apply:
+  `cardio` (duration_min, calories_burned), `sets` (sets, reps, optional weight_lbs —
+  also bodyweight moves like pushups), `hang` (sets, hang_seconds, rest_seconds). `NULL`
+  is a legacy row, treated as cardio. Columns added by `migrate_exercise.py`; entries are
+  editable via a modal on `/exercise/`
 - **Goal** — target value for a `goal_type` (weight, body_fat_pct, or a measurement),
   with starting value (captured from the latest entry when the goal is created) and
   optional target date
@@ -378,20 +383,22 @@ entirely so `quick_log()`'s fallback (`sm.meal_type`) logs them as `"alcohol"` u
 adding `.quick-meal-type` to a drink button would silently break the whole feature by
 re-time-guessing it.
 
-**Dashboard access:** a small "🍸 Log a drink" text link sits below `.vitals` rather than
-becoming a 6th grid cell — the 5-cell grid's `grid-template-columns`/`grid-row: span 2`
-auto-placement (see Dashboard Layout below) is tuned for exactly 5 cells in a specific
-DOM order, and a drink shortcut isn't worth re-deriving that. It opens a `quickDrinkModal`
-listing the same saved drinks as one-tap buttons. Logging one needs to return to the
+**Dashboard access:** the calories/protein vitals cells open `quickMealModal`, which has
+two tabs — **Meal** (the photo/text AI-parse form) and **Drinks** (the saved drinks as
+one-tap buttons, plus a "Manage drinks" link). This replaced an earlier separate
+"🍸 Log a drink" link + `quickDrinkModal` below `.vitals`; a drink shortcut was never
+worth a 6th cell in the 5-cell grid (see Dashboard Layout below), and a tab keeps it one
+tap away without extra chrome. The drink buttons deliberately have no `.quick-meal-type`
+field (same gotcha as above). Logging one needs to return to the
 dashboard, not `/meals/` — so `quick_log()` gained the same allowlisted-redirect pattern
 `body.add_stat()` already uses (`_safe_next()` in `meals.py`, mirroring `body.py`'s): a
 hidden `next` field set to `url_for('index')` on the dashboard's forms only.
 
 The AI coach's `log_meal` tool and system prompt were updated the same way — `"alcohol"`
 added to the tool's `meal_type` enum, with an explicit instruction to use it for any
-drink regardless of time of day. `build_context_summary()` needed no change: its meal
-section only reports daily calorie/protein totals, not a per-meal-type breakdown, so
-alcohol was already folded in correctly.
+drink regardless of time of day. `build_context_summary()` reports drinks per day
+(via `MealEntry.drink_count`) alongside the daily calorie/protein totals, and tags each
+alcohol line in the recent-meals detail with its drink count.
 
 ---
 
@@ -506,7 +513,9 @@ that Sunday-through-Saturday window and counts only today's entry so far.
 **Tool use:** `get_response()` runs a tool-use loop (`TOOLS` in `app/ai_coach.py`) with
 eight tools — `log_body_stat`, `log_measurement`, `log_meal`, `log_exercise`, `set_goal`,
 `set_nutrition_targets`, `save_note`, `delete_note` — each of which writes directly to
-the DB via `_execute_tool()`, scoped to the current user. The system prompt explicitly forbids claiming something was
+the DB via `_execute_tool()`, scoped to the current user. `set_goal` and
+`set_nutrition_targets` act on the current `TrackingPeriod` (goals attach to it and default
+to its end date; targets are the period's, and the tool errors if no period exists). The system prompt explicitly forbids claiming something was
 logged unless a tool was actually called that turn (an earlier version had no tools at
 all and would confidently claim to have logged things it never saved — confirmed via a
 prod bug report: it told the user "I've logged 233 lbs" four times with zero `BodyStat`
@@ -608,8 +617,6 @@ Reuses the `vibesplit` SSH alias — see `deploy/hosts.ini` in vibe-split for th
   Fine for "me and maybe a friend or two"; revisit if it grows further.
 - **No wearable/third-party integration** (Apple Health, Fitbit, MyFitnessPal) — meals
   and exercise are logged manually or via AI photo/text parsing only.
-- **Exercise logging is intentionally simple** — activity/duration/notes, not structured
-  sets/reps/weight. Revisit if strength-training detail becomes important.
 - **Coach chat has no streaming** — full request/response per turn. Fine at current
   message lengths; would need SSE/websockets if responses get slow.
 - **No CSRF protection** — Flask doesn't add CSRF tokens automatically; consider
