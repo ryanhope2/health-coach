@@ -44,7 +44,15 @@
         {% if recap %}{{ recap_button(recap.week_start, 'Refresh', 'arrow-clockwise') }}{% endif %}
       </div>
       {% if recap %}
-        <p class="mb-2">{{ recap.content }}</p>
+        {% if recap.headline %}
+          <p class="mb-1">{{ recap.headline }}</p>
+          <details class="recap-full mb-2">
+            <summary class="small">Read full recap</summary>
+            <p class="mt-2 mb-0">{{ recap.content }}</p>
+          </details>
+        {% else %}
+          <p class="mb-2">{{ recap.content }}</p>
+        {% endif %}
       {% else %}
         <p class="text-muted mb-2">Recaps are written every Sunday morning for the week that just ended.</p>
       {% endif %}

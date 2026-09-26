@@ -170,3 +170,10 @@ details.week[open] > summary { font-weight: 600; }
   margin: .25rem 0 .5rem;
 }
 .week-days .week-row { font-size: .8rem; padding: .2rem 0; }
+.recap-full > summary {
+  color: var(--bs-link-color);
+  cursor: pointer;
+  list-style: none;
+}
+.recap-full > summary::-webkit-details-marker { display: none; }
+.recap-full[open] > summary { display: none; }

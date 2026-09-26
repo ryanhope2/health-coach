@@ -107,7 +107,7 @@ Flask app  (wsgi.py → app/__init__.py)
 - **Goal** — target value for a `goal_type` (weight, body_fat_pct, or a measurement),
   with starting value (captured from the latest entry when the goal is created) and
   optional target date
-- **WeeklyRecap** — AI-written summary of one Sun-Sat week (`week_start`, `content`,
+- **WeeklyRecap** — AI-written summary of one Sun-Sat week (`week_start`, `headline`, `content`,
   `covers_through` — earlier than Saturday for a mid-week "so far" recap). One row per
   week; regenerating rewrites it in place
 - **ChatMessage** — one turn (user or assistant) of the AI coach conversation, kept so
@@ -295,6 +295,15 @@ use identical code). Sections, top to bottom:
   page) plus CoachNotes, meal descriptions, workouts, and that week's chat, so it can say
   *why* a week looked the way it did (e.g. the `travel` note explaining a Disney week).
   The latest recap is also injected into the AI coach's context.
+  **Two lengths from one call:** the model returns JSON with a ≤35-word `headline` (shown by
+  default) and a ≤130-word `recap` (`content`, behind "Read full recap"). The first version
+  was a single ~280-word paragraph that pushed the weight chart below the fold; the user
+  liked every insight in it, so the fix was compression (every sentence must carry a number
+  or specific fact, no filler) plus a short/long split — not dropping content or moving the
+  recap to the bottom of the page. `_parse_recap()` falls back to first-sentence-as-headline
+  if the reply isn't valid JSON, rather than losing the recap. The prompt also forbids
+  counting from the raw meal/workout lists (only the given summary numbers) — the first
+  recap re-counted workouts itself and called a Disney walking day a Peloton ride.
 - **Weight card** — start = first-week average, now = 7-day average, goal = the period's
   active weight goal. Pace status compares the 7-day average against the straight
   baseline→target line **at the midpoint of the readings being averaged**, not today (a

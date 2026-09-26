@@ -4,6 +4,7 @@ the Progress page shows (computed by app/progress.py and handed to the model, ne
 re-derived by it) plus the context that explains them — CoachNotes, what was actually
 eaten, the workouts, and that week's coach chat.
 """
+import json
 from datetime import datetime, timedelta
 
 import anthropic
@@ -19,21 +20,30 @@ MAX_CHAT_MESSAGES = 60
 MAX_CHAT_CHARS = 400
 
 RECAP_PROMPT = """You write the weekly recap on a personal fitness tracker's Progress page. The \
-person reads it to see, at a glance, how their week actually went against their goals.
+person reads it to see how their week actually went against their goals.
 
-Write 4-6 sentences of plain prose, in second person ("you"). No headings, bullets, or markdown. \
-Cover what went well, what slipped, and where they stand against their goal pace, using the \
-specific numbers given below — never compute or invent your own totals. Use the notes, meals, \
-workouts, and chat to explain *why* a week looked the way it did (travel, an event, an injury) \
-rather than treating every week as ordinary. End with one concrete, specific thing to focus on \
-next week. Be direct and honest, not a cheerleader — no exclamation points, no generic praise.{in_progress}
+Return ONLY a JSON object with two fields:
+- "headline": at most 35 words, 1-2 sentences. The week's verdict in the fewest words: the \
+biggest win, the biggest miss, where they stand on goal pace, then "Focus:" and the one thing to \
+do next. Fragments are fine.
+- "recap": at most 130 words of plain prose, second person ("you"), no headings, bullets, or \
+markdown. Cover what went well, what slipped, and goal pace, and use the notes, meals, workouts, \
+and chat to explain *why* the week looked the way it did (travel, an event, an injury) — name \
+the specific days and meals behind a miss. End with "Focus:" and one concrete, specific thing to \
+do next week. Every sentence should carry a number or a specific fact; cut filler and \
+transitions ("The pattern behind the overages is readable") entirely.
+
+Every count and total (days, drinks, averages, workouts by type) must come from the summary \
+numbers given below, never from counting items in the meal or workout lists yourself — those \
+lists are only for explaining why. Be direct and honest, not a cheerleader: no exclamation \
+points, no generic praise.{in_progress}
 
 {data}"""
 
 IN_PROGRESS_NOTE = """
 
 This week is still in progress (through {through}), so describe it as "so far" and make the \
-closing focus about the rest of this week instead of next week."""
+closing focus (in both fields) about the rest of this week instead of next week."""
 
 
 def _fmt(value, spec=".0f", suffix=""):
@@ -147,17 +157,33 @@ def generate_recap(api_key, user, period, wk_start, as_of=None):
     response = client.messages.create(
         model=CHAT_MODEL, max_tokens=600, messages=[{"role": "user", "content": prompt}],
     )
-    content = "".join(b.text for b in response.content if b.type == "text").strip()
+    raw = "".join(b.text for b in response.content if b.type == "text").strip()
+    headline, content = _parse_recap(raw)
 
     recap = WeeklyRecap.query.filter_by(user_id=user.id, week_start=wk_start).first()
     if recap is None:
         recap = WeeklyRecap(user_id=user.id, week_start=wk_start)
         db.session.add(recap)
+    recap.headline = headline
     recap.content = content
     recap.covers_through = this_week["last"]
     recap.generated_at = datetime.utcnow()
     db.session.commit()
     return recap
+
+
+def _parse_recap(raw):
+    """(headline, full recap) from the model's JSON reply. If it didn't return valid JSON,
+    keep the whole reply as the full recap and use its first sentence as the headline
+    rather than losing the recap."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+    try:
+        data = json.loads(text)
+        return data["headline"].strip(), data["recap"].strip()
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return raw.split(". ", 1)[0].rstrip(".") + ".", raw
 
 
 def latest_recap(user_id):

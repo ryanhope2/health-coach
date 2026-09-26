@@ -277,6 +277,7 @@ class WeeklyRecap(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     week_start = db.Column(db.Date, nullable=False)  # the Sunday
-    content = db.Column(db.Text, nullable=False)
+    headline = db.Column(db.Text, nullable=True)  # 1-2 sentence version shown by default
+    content = db.Column(db.Text, nullable=False)  # full (still compact) version, behind "Read full recap"
     covers_through = db.Column(db.Date, nullable=False)  # last day included — < Saturday for a mid-week recap
     generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
