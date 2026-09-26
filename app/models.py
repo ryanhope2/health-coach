@@ -263,3 +263,20 @@ class ChatMessage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     user = db.relationship("User", back_populates="chat_messages")
+
+
+class WeeklyRecap(db.Model):
+    """
+    AI-written summary of one Sun-Sat week, generated Sunday morning for the week that just
+    ended (generate_recaps.py via cron) or on demand from the Progress page. One row per
+    week — regenerating replaces the content in place.
+    """
+    __tablename__ = "weekly_recaps"
+    __table_args__ = (db.UniqueConstraint("user_id", "week_start", name="uq_weekly_recap_user_week"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    week_start = db.Column(db.Date, nullable=False)  # the Sunday
+    content = db.Column(db.Text, nullable=False)
+    covers_through = db.Column(db.Date, nullable=False)  # last day included — < Saturday for a mid-week recap
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

@@ -57,6 +57,9 @@ Flask app  (wsgi.py → app/__init__.py)
 | `app/blueprints/meals.py` | Log a meal (photo/text/quick-repeat), AI parse, review/confirm, history |
 | `app/blueprints/exercise.py` | Simple activity log (type, duration, notes) |
 | `app/blueprints/goals.py` | Targets for weight/body-fat/measurements + daily calorie/protein targets |
+| `app/blueprints/progress.py` | Progress page (`/progress/`) + `/progress/recap` (write/rewrite a week's AI recap) |
+| `app/recap.py` | Builds the weekly-recap prompt from `progress.py` numbers + notes/meals/workouts/chat, calls Claude, upserts `WeeklyRecap` |
+| `generate_recaps.py` | Sunday cron (11:00 UTC): writes the recap for the week that just ended |
 | `app/blueprints/coach.py` | AI coach chat + `/coach/notes` CRUD for persistent memory |
 | `migrate_exercise.py` | One-time (re-runnable) migration adding the structured exercise columns |
 | `migrate_periods.py` | One-time (re-runnable) migration: `tracking_periods` table, `goals.period_id`, `meal_entries.drinks`, seeds the first period from the old `User` columns |
@@ -104,6 +107,9 @@ Flask app  (wsgi.py → app/__init__.py)
 - **Goal** — target value for a `goal_type` (weight, body_fat_pct, or a measurement),
   with starting value (captured from the latest entry when the goal is created) and
   optional target date
+- **WeeklyRecap** — AI-written summary of one Sun-Sat week (`week_start`, `content`,
+  `covers_through` — earlier than Saturday for a mid-week "so far" recap). One row per
+  week; regenerating rewrites it in place
 - **ChatMessage** — one turn (user or assistant) of the AI coach conversation, kept so
   the coach has continuity across sessions
 - **CoachNote** — a durable, keyed fact for the coach's persistent memory (see AI Coach
@@ -272,6 +278,47 @@ markup. `100dvh` (not `100vh`) specifically so this doesn't miscalculate when a 
 browser's chrome shows/hides.
 
 ---
+
+## Progress Page (`/progress/`)
+
+A separate page the user checks when they want to — deliberately *not* on the dashboard,
+which stays coach-chat-first. Everything is scoped to the current `TrackingPeriod`, and all
+the math lives in `app/progress.py` (functions take an `as_of` date rather than reading the
+clock, so the page's "this week so far" and a recap of a finished week written days later
+use identical code). Sections, top to bottom:
+
+- **Period header** — name, dates, "week N of M · X days left" (Sun-Sat weeks overlapping
+  the period, so partial first/last weeks count), elapsed bar.
+- **Weekly recap** — latest `WeeklyRecap`, with Refresh, plus "Recap last week" / "Recap this
+  week so far" buttons when those don't exist yet. Written by `app/recap.py`: the prompt
+  hands the model the page's own computed numbers (so the recap can never contradict the
+  page) plus CoachNotes, meal descriptions, workouts, and that week's chat, so it can say
+  *why* a week looked the way it did (e.g. the `travel` note explaining a Disney week).
+  The latest recap is also injected into the AI coach's context.
+- **Weight card** — start = first-week average, now = 7-day average, goal = the period's
+  active weight goal. Pace status compares the 7-day average against the straight
+  baseline→target line **at the midpoint of the readings being averaged**, not today (a
+  trailing average lags the calendar by ~3 days, which made it read "behind" when it
+  wasn't); ±0.5 lb counts as on pace. Chart.js (cdnjs) plots daily readings, the 7-day
+  average, the pace line, and a least-squares trend projected to the period end — the
+  projection only appears after 14 days / 5 readings. **Body fat has no card and no table
+  column on purpose** — per the user, its daily readings (28-31% swings) are too noisy to
+  be worth showing weekly; the data and goal still exist and the recap may mention it.
+  (A fat-mass metric, weight × BF%, was considered and dropped for the same reason.)
+- **This week** tiles — calories avg + days in range, protein avg + days hit, drinks
+  (total, drinking days, drink kcal), exercise days (cardio/strength split).
+- **Weeks this period** — one `<details>` row per week (avg weight, avg kcal, days in range,
+  drinks, exercise days) expanding to daily numbers. CSS-grid rows, not a `<table>`,
+  because a `<summary>` can't be a table row.
+
+**Counting rules** (all in `progress.week_summary()`): calories are "in range" at ≤ target
++ 5% (`CALORIE_TOLERANCE`; the user chose 5% over 10% deliberately, and exercise calories
+are *not* added back — the target already accounts for exercise). There is **no lower
+bound**: a very low day is almost always a missed log (e.g. dinner not logged), not
+under-eating. Protein "hit" is ≥ target exactly, no tolerance. Calorie/protein averages
+only use days with ≥1 confirmed meal and exclude today (a half-logged day would drag the
+average down); drinks and exercise *do* count today, since those have already happened.
+Strength = `exercise_type` `sets` or `hang`.
 
 ## Meal Logging Flow
 

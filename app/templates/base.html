@@ -58,6 +58,12 @@
           </a>
         </li>
         <li class="nav-item">
+          <a class="nav-link {% if request.blueprint == 'progress' %}active{% endif %}"
+             href="{{ url_for('progress.index') }}">
+            <i class="bi bi-bar-chart-line me-1"></i>Progress
+          </a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link {% if request.blueprint == 'goals' %}active{% endif %}"
              href="{{ url_for('goals.index') }}">
             <i class="bi bi-flag me-1"></i>Goals

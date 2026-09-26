@@ -9,6 +9,7 @@ from .blueprints.coach import coach_bp
 from .blueprints.exercise import exercise_bp
 from .blueprints.goals import goals_bp
 from .blueprints.meals import meals_bp
+from .blueprints.progress import progress_bp
 from .extensions import db
 
 
@@ -45,6 +46,7 @@ def create_app(config=None):
     app.register_blueprint(exercise_bp)
     app.register_blueprint(goals_bp)
     app.register_blueprint(coach_bp)
+    app.register_blueprint(progress_bp)
 
     @app.before_request
     def require_login():

@@ -559,6 +559,13 @@ def build_context_summary(user) -> str:
             for e in prior:
                 lines.append(_fmt_exercise(e))
 
+    # Same text the Progress page shows, so "how did last week go?" gets a consistent answer.
+    from .recap import latest_recap
+    recap = latest_recap(user.id)
+    if recap:
+        lines.append(f"\nMost recent weekly recap (week of {recap.week_start}, through {recap.covers_through}):")
+        lines.append(f"  {recap.content}")
+
     active_goals = Goal.query.filter_by(user_id=user.id, is_active=True).all()
     if active_goals:
         lines.append("\nActive goals:")

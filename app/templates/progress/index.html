@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Progress — Moron Fitness{% endblock %}
+
+{% macro num(v, fmt='%.0f', dash='—') %}{{ fmt|format(v) if v is not none else dash }}{% endmacro %}
+{% macro recap_button(week_start, label, icon) %}
+  <form method="post" action="{{ url_for('progress.recap') }}" class="d-inline guard-double-submit" data-busy-label="Writing…">
+    <input type="hidden" name="week_start" value="{{ week_start }}">
+    <button class="btn btn-link btn-sm p-0 text-decoration-none"><i class="bi bi-{{ icon }} me-1"></i>{{ label }}</button>
+  </form>
+{% endmacro %}
+
+{% block content %}
+{% if not period %}
+  <h1 class="h3 mb-3">Progress</h1>
+  <p class="text-muted">Progress is tracked per period. <a href="{{ url_for('goals.index') }}">Start a period</a> on the Goals page.</p>
+{% else %}
+
+<div class="progress-page">
+
+  {# Period header #}
+  <div class="mb-3">
+    <div class="d-flex justify-content-between align-items-baseline">
+      <h1 class="h4 mb-0">{{ period.name }}</h1>
+      <span class="text-muted small">{{ period.start_date.strftime('%b %-d') }} → {{ period.end_date.strftime('%b %-d') }}</span>
+    </div>
+    <div class="text-muted small mb-2">
+      {% if position.ended %}Ended {{ period.end_date.strftime('%b %-d') }}
+      {% else %}Week {{ position.week }} of {{ position.total_weeks }} · {{ position.days_left }} days left{% endif %}
+    </div>
+    <div class="progress" style="height: 6px;" role="progressbar" aria-label="Period elapsed" aria-valuenow="{{ elapsed_pct }}" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-bar bg-secondary" style="width: {{ elapsed_pct }}%"></div>
+    </div>
+  </div>
+
+  {# AI weekly recap #}
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-baseline mb-1 small">
+        <span class="text-muted">
+          <i class="bi bi-stars me-1"></i>
+          {% if recap %}Recap · week of {{ recap.week_start.strftime('%b %-d') }}{% if recap_partial %} (through {{ recap.covers_through.strftime('%a') }}){% endif %}
+          {% else %}Weekly recap{% endif %}
+        </span>
+        {% if recap %}{{ recap_button(recap.week_start, 'Refresh', 'arrow-clockwise') }}{% endif %}
+      </div>
+      {% if recap %}
+        <p class="mb-2">{{ recap.content }}</p>
+      {% else %}
+        <p class="text-muted mb-2">Recaps are written every Sunday morning for the week that just ended.</p>
+      {% endif %}
+      <div class="small">
+        {% if last_finished_week and (not recap or recap.week_start != last_finished_week) %}
+          {{ recap_button(last_finished_week, 'Recap last week', 'journal-text') }}
+          {% if current_week_start %}<span class="text-muted mx-1">·</span>{% endif %}
+        {% endif %}
+        {% if current_week_start and (not recap or recap.week_start != current_week_start) %}
+          {{ recap_button(current_week_start, 'Recap this week so far', 'journal-text') }}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Weight vs. goal #}
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <span class="fw-semibold">Weight</span>
+        {% if weight.status %}
+          <span class="badge rounded-pill {{ 'text-bg-warning' if weight.status == 'behind' else 'text-bg-success' }}">
+            {% if weight.status == 'on pace' %}on pace{% else %}{{ '%.1f'|format(weight.gap) }} lb {{ weight.status }} pace{% endif %}
+          </span>
+        {% endif %}
+      </div>
+      <div class="d-flex justify-content-between small">
+        <span>Start <strong>{{ num(weight.baseline, '%.1f') }}</strong></span>
+        <span>Now <strong>{{ num(weight.current, '%.1f') }}</strong> <span class="text-muted">7-day avg</span></span>
+        <span>Goal <strong>{{ num(weight.target, '%.1f') }}</strong></span>
+      </div>
+      <div class="weight-chart-wrap my-2"><canvas id="weightChart" aria-label="Weight over the period with 7-day average, goal pace line, and trend projection"></canvas></div>
+      <div class="small text-muted">
+        {% if weight.projection %}
+          Trend {{ '%+.2f'|format(weight.projection.per_week) }} lb/wk → <strong class="text-body">{{ '%.1f'|format(weight.projection.end_value) }}</strong> projected {{ period.end_date.strftime('%b %-d') }}{% if weight.pace_per_week is not none %} · pace needed {{ '%+.2f'|format(weight.pace_per_week) }} lb/wk{% endif %}
+        {% else %}
+          Projection appears after two weeks of readings.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# This week so far #}
+  {% if this_week %}
+    <div class="d-flex justify-content-between align-items-baseline small text-muted mb-2">
+      <span>This week · {{ this_week.first.strftime('%a %-m/%-d') }}–{{ this_week.last.strftime('%a %-m/%-d') }}</span>
+      <span>calories count finished days only</span>
+    </div>
+    <div class="stat-tiles mb-3">
+      <div class="stat-tile">
+        <div class="label">Calories avg</div>
+        <div class="value">{{ '{:,.0f}'.format(this_week.calories_avg) if this_week.calories_avg is not none else '—' }}</div>
+        <div class="sub">≤{{ '{:,}'.format(calorie_cap) if calorie_cap else '—' }}: {{ this_week.calories_in_range }} of {{ this_week.meal_days }} days</div>
+      </div>
+      <div class="stat-tile">
+        <div class="label">Protein avg</div>
+        <div class="value">{{ num(this_week.protein_avg) }}g</div>
+        <div class="sub">≥{{ '%.0f'|format(period.daily_protein_target_g) if period.daily_protein_target_g else '—' }}g: {{ this_week.protein_hit }} of {{ this_week.meal_days }} days</div>
+      </div>
+      <div class="stat-tile">
+        <div class="label">Drinks</div>
+        <div class="value">{{ '%g'|format(this_week.drinks) }}</div>
+        <div class="sub">{{ this_week.drinking_days }} day{{ '' if this_week.drinking_days == 1 else 's' }} · {{ '{:,}'.format(this_week.drink_calories) }} kcal</div>
+      </div>
+      <div class="stat-tile">
+        <div class="label">Exercise</div>
+        <div class="value {{ 'text-success' if this_week.exercise_met }}">{{ this_week.exercise_days }} day{{ '' if this_week.exercise_days == 1 else 's' }}</div>
+        <div class="sub">{{ this_week.cardio_days }} cardio · {{ this_week.strength_days }} strength</div>
+      </div>
+    </div>
+  {% endif %}
+
+  {# Every week of the period #}
+  <div class="card mb-3">
+    <div class="card-body pb-2">
+      <div class="d-flex justify-content-between small text-muted mb-1">
+        <span>Weeks this period</span><span>tap a week for daily numbers</span>
+      </div>
+      <div class="week-row week-head">
+        <span>Week</span><span>Wt</span><span>Kcal</span><span>≤{{ '{:,}'.format(calorie_cap) if calorie_cap else '—' }}</span><span>Drinks</span><span>Ex</span>
+      </div>
+      {% for w in weeks %}
+        <details class="week">
+          <summary class="week-row">
+            <span>{{ w.start.strftime('%-m/%-d') }}{% if w.in_progress %}*{% elif w.partial %}†{% endif %}</span>
+            <span>{{ num(w.weight_avg, '%.1f') }}</span>
+            <span class="{{ 'text-success' if w.calories_avg is not none and calorie_cap and w.calories_avg <= calorie_cap }}">{{ '{:,.0f}'.format(w.calories_avg) if w.calories_avg is not none else '—' }}</span>
+            <span>{{ w.calories_in_range }}/{{ w.meal_days }}</span>
+            <span>{{ '%g'|format(w.drinks) }}</span>
+            <span class="{{ 'text-success fw-semibold' if w.exercise_met }}">{{ w.exercise_days }}</span>
+          </summary>
+          <div class="week-days">
+            {% for d in w.days|reverse %}
+              <div class="week-row">
+                <span>{{ d.date.strftime('%a') }}</span>
+                <span>{{ num(d.weight, '%.1f', '') }}</span>
+                {% if d.meals_logged %}
+                  <span class="{{ 'text-success' if calorie_cap and d.calories <= calorie_cap }}">{{ '{:,}'.format(d.calories) }}</span>
+                {% else %}<span class="text-muted">—</span>{% endif %}
+                <span class="text-muted">{% if d.date == today %}today{% endif %}</span>
+                <span>{{ '%g'|format(d.drinks) if d.drinks else '' }}</span>
+                <span>{% if d.exercise %}<i class="bi bi-check-lg text-success" title="{{ d.exercise|sort|join(', ') }}"></i>{% endif %}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+      {% endfor %}
+      <div class="small text-muted mt-1">* in progress · † partial week</div>
+    </div>
+  </div>
+
+  {% if older_recaps %}
+    <details class="card mb-3">
+      <summary class="card-header small">Earlier recaps</summary>
+      <div class="list-group list-group-flush">
+        {% for r in older_recaps %}
+          <div class="list-group-item">
+            <div class="small fw-semibold mb-1">Week of {{ r.week_start.strftime('%b %-d') }}</div>
+            <div class="small">{{ r.content }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
+
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+{% if period %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+  (function () {
+    var c = {{ weight.chart|tojson }};
+    var start = new Date(c.start + 'T12:00:00');
+    function dayLabel(offset) {
+      var d = new Date(start.getTime() + offset * 86400000);
+      return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+    }
+    function pts(pairs) { return (pairs || []).map(function (p) { return {x: p[0], y: p[1]}; }); }
+
+    var datasets = [
+      {label: 'Daily', data: pts(c.readings), showLine: false, pointRadius: 2.5,
+       pointBackgroundColor: 'rgba(108,117,125,.55)', pointBorderWidth: 0},
+      {label: '7-day avg', data: pts(c.rolling), borderColor: '#198754', borderWidth: 2.5,
+       pointRadius: 0, tension: 0.25},
+    ];
+    if (c.pace) datasets.push({label: 'Pace to goal', data: pts(c.pace), borderColor: '#6c757d',
+      borderWidth: 1, borderDash: [4, 4], pointRadius: 0});
+    if (c.projection) datasets.push({label: 'Current trend', data: pts(c.projection), borderColor: '#0d6efd',
+      borderWidth: 1.5, borderDash: [1, 3], pointRadius: [0, 3], pointBackgroundColor: '#0d6efd'});
+
+    new Chart(document.getElementById('weightChart'), {
+      type: 'line',
+      data: {datasets: datasets},
+      options: {
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: {mode: 'nearest', intersect: false},
+        scales: {
+          x: {type: 'linear', min: 0, max: c.total_days,
+              ticks: {stepSize: 14, callback: dayLabel, maxRotation: 0}, grid: {display: false}},
+          y: {ticks: {precision: 0}, grace: '5%'},
+        },
+        plugins: {
+          legend: {position: 'bottom', labels: {boxWidth: 12, boxHeight: 2, font: {size: 11}}},
+          tooltip: {callbacks: {
+            title: function (items) { return dayLabel(items[0].parsed.x); },
+            label: function (item) { return item.dataset.label + ': ' + item.parsed.y.toFixed(1); },
+          }},
+        },
+      },
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

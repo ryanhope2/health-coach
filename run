@@ -69,7 +69,10 @@ case "$cmd" in
         echo "→ Starting service ..."
         ssh "$SERVER" "sudo systemctl start $SERVICE"
         echo "→ Installing daily photo-cleanup cron ..."
-        ssh "$SERVER" "(crontab -l 2>/dev/null | grep -v moron-fitness/cleanup_photos.py; echo '17 4 * * * cd $REMOTE_PATH && .venv/bin/python cleanup_photos.py >> /var/log/$SERVICE/cleanup.log 2>&1') | crontab -"
+        ssh "$SERVER" "(crontab -l 2>/dev/null | grep -v cleanup_photos.py; echo '17 4 * * * cd $REMOTE_PATH && .venv/bin/python cleanup_photos.py >> /var/log/$SERVICE/cleanup.log 2>&1') | crontab -"
+        echo "→ Installing Sunday weekly-recap cron ..."
+        # 11:00 UTC = 7am EDT / 6am EST, after the Saturday it summarizes has ended in Eastern time.
+        ssh "$SERVER" "(crontab -l 2>/dev/null | grep -v generate_recaps.py; echo '0 11 * * 0 cd $REMOTE_PATH && .venv/bin/python generate_recaps.py >> /var/log/$SERVICE/recaps.log 2>&1') | crontab -"
         echo ""
         echo "✓ Setup complete. Next: ./run cert"
         ;;

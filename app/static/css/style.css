@@ -112,3 +112,61 @@ body {
 .vitals .dot-yellow { background: #ffc107; }
 .vitals .dot-green { background: #198754; }
 
+
+/* Progress page */
+.weight-chart-wrap {
+  position: relative;
+  height: 220px;
+}
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .5rem;
+}
+@media (min-width: 768px) {
+  .stat-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.stat-tile {
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.125);
+  border-radius: .5rem;
+  padding: .5rem .75rem;
+}
+.stat-tile .label, .stat-tile .sub {
+  font-size: .75rem;
+  color: #6c757d;
+}
+.stat-tile .value {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+/* Weekly table: CSS grid rows rather than a <table>, so each week can be a native
+   <details> disclosure (a <summary> can't be a table row). */
+.week-row {
+  display: grid;
+  grid-template-columns: 3.25rem repeat(5, minmax(0, 1fr));
+  gap: .25rem;
+  font-size: .85rem;
+  padding: .35rem 0;
+  text-align: right;
+}
+.week-row > span:first-child { text-align: left; }
+.week-head {
+  font-size: .75rem;
+  color: #6c757d;
+  border-bottom: 1px solid rgba(0,0,0,.1);
+}
+details.week > summary {
+  list-style: none;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0,0,0,.06);
+}
+details.week > summary::-webkit-details-marker { display: none; }
+details.week[open] > summary { font-weight: 600; }
+.week-days {
+  background: #f8f9fa;
+  border-radius: .25rem;
+  padding: 0 .5rem;
+  margin: .25rem 0 .5rem;
+}
+.week-days .week-row { font-size: .8rem; padding: .2rem 0; }

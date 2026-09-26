@@ -7,7 +7,7 @@
 //
 // Usage: add class="guard-double-submit" to any <form>, including ones
 // rendered in a loop (e.g. one per saved meal) — querySelectorAll picks up
-// all of them.
+// all of them. data-busy-label="Writing…" overrides the default "Saving…".
 //
 // Disabling the button is deferred a tick (setTimeout 0), not done
 // synchronously in the submit handler — doing it synchronously can cancel
@@ -25,7 +25,7 @@
       setTimeout(function () {
         if (submitBtn) {
           submitBtn.disabled = true;
-          submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving…';
+          submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + (form.dataset.busyLabel || 'Saving…');
         }
       }, 0);
     });
