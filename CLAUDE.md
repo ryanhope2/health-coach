@@ -295,7 +295,7 @@ use identical code). Sections, top to bottom:
   page) plus CoachNotes, meal descriptions, workouts, and that week's chat, so it can say
   *why* a week looked the way it did (e.g. the `travel` note explaining a Disney week).
   The latest recap is also injected into the AI coach's context.
-  **Two lengths from one call:** the model returns JSON with a ≤35-word `headline` (shown by
+  **Two lengths from one call:** the model returns (via a tool call) a ≤35-word `headline` (shown by
   default) and a ≤130-word `recap` (`content`, behind "Read full recap"). The first version
   was a single ~280-word paragraph that pushed the weight chart below the fold; the user
   liked every insight in it, so the fix was compression (every sentence must carry a number
