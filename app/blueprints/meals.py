@@ -274,6 +274,60 @@ def review(meal_id):
     return render_template("meals/review.html", meal=meal, meal_date=meal_date)
 
 
+@meals_bp.route("/<int:meal_id>/re-estimate", methods=["POST"])
+def re_estimate(meal_id):
+    meal = MealEntry.query.filter_by(id=meal_id, user_id=_current_user_id()).first_or_404()
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+    description = request.form.get("description", "").strip() or None
+
+    if not description and not meal.photo_path:
+        msg = "Add a description or a photo (or both)."
+        if is_ajax:
+            return jsonify({"error": msg}), 400
+        flash(msg, "error")
+        return redirect(url_for("meals.review", meal_id=meal.id))
+
+    try:
+        result = parse_meal(
+            api_key=current_app.config["ANTHROPIC_API_KEY"],
+            photo_path=meal.photo_path,
+            text_description=description,
+        )
+    except Exception as e:
+        current_app.logger.exception("re-estimate failed")
+        msg = f"AI parsing failed ({e})."
+        if is_ajax:
+            return jsonify({"error": msg}), 400
+        flash(msg, "error")
+        return redirect(url_for("meals.review", meal_id=meal.id))
+
+    if description:
+        meal.description = description
+    meal.calories = round(result.get("total_calories") or 0) or None
+    meal.protein_g = result.get("total_protein_g")
+    meal.carbs_g = result.get("total_carbs_g")
+    meal.fat_g = result.get("total_fat_g")
+    meal.ai_raw_response = result.get("_raw_text")
+    FoodItem.query.filter_by(meal_id=meal.id).delete()
+    for item in result.get("items", []):
+        db.session.add(FoodItem(
+            meal_id=meal.id,
+            name=item.get("name", "Item"),
+            quantity=item.get("quantity"),
+            calories=item.get("calories"),
+            protein_g=item.get("protein_g"),
+            carbs_g=item.get("carbs_g"),
+            fat_g=item.get("fat_g"),
+        ))
+    db.session.commit()
+
+    review_url = url_for("meals.review", meal_id=meal.id)
+    if is_ajax:
+        return jsonify({"redirect": review_url})
+    return redirect(review_url)
+
+
 @meals_bp.route("/<int:meal_id>/photo")
 def photo(meal_id):
     meal = MealEntry.query.filter_by(id=meal_id, user_id=_current_user_id()).first_or_404()

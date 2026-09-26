@@ -33,11 +33,6 @@
     </div>
   </div>
 
-  <div class="text-center mb-2">
-    <a role="button" data-bs-toggle="modal" data-bs-target="#quickDrinkModal"
-       class="small text-muted text-decoration-none">🍸 Log a drink</a>
-  </div>
-
   {% set compact = true %}
   {% include "coach/_widget.html" %}
 </div>
@@ -80,75 +75,72 @@
 <div class="modal fade" id="quickMealModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <form id="quickMealForm" action="{{ url_for('meals.new') }}" enctype="multipart/form-data">
-        <div class="modal-header">
-          <h5 class="modal-title">Log a meal</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div id="quickMealError" class="alert alert-danger py-2" hidden></div>
-          <label class="form-label">What did you eat?</label>
-          <div class="input-group">
-            <textarea name="description" id="quickMealInput" class="form-control" rows="2"
-                      placeholder="e.g. Grilled chicken, rice, and a side salad" autofocus></textarea>
-            <button type="button" class="btn btn-outline-secondary" id="quickMealMicBtn" title="Speak what you ate">
-              <i class="bi bi-mic"></i>
-            </button>
-          </div>
-          <div class="form-text" id="quickMealHeard">Tap the mic and say what you ate, or type it in.</div>
-          <div class="mt-3">
-            <label class="form-label">Photo (optional)</label>
-            <input type="file" name="photo" id="quickMealPhoto" accept="image/*" capture="environment" class="form-control">
-            <img id="quickMealPhotoPreview" class="img-fluid rounded mt-2" style="max-height: 160px;" hidden>
-          </div>
-          <div class="mt-3">
-            <label class="form-label">Meal type (optional)</label>
-            <select name="meal_type" id="quickMealType" class="form-select">
-              <option value="">—</option>
-              <option value="breakfast">Breakfast</option>
-              <option value="lunch">Lunch</option>
-              <option value="dinner">Dinner</option>
-              <option value="snack">Snack</option>
-              <option value="alcohol">Alcohol</option>
-            </select>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="quickMealCancelBtn">Cancel</button>
-          <button type="submit" class="btn btn-success" id="quickMealSubmitBtn"><i class="bi bi-stars me-1"></i>Estimate with AI</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<div class="modal fade" id="quickDrinkModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Log a drink</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      <div class="modal-header pb-0 border-bottom-0">
+        <ul class="nav nav-tabs flex-grow-1" id="logModalTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="meal-tab-btn" data-bs-toggle="tab" data-bs-target="#meal-tab-pane" type="button" role="tab">Meal</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="drinks-tab-btn" data-bs-toggle="tab" data-bs-target="#drinks-tab-pane" type="button" role="tab">Drinks</button>
+          </li>
+        </ul>
+        <button type="button" class="btn-close ms-2 mb-auto mt-1" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body d-flex flex-wrap gap-2">
-        {% for sm in saved_drinks %}
-          <!-- No .quick-meal-type field: drinks must never pick up a clock-guessed
-               meal type, so quick_log() falls back to this saved meal_type (alcohol). -->
-          <form method="post" action="{{ url_for('meals.quick_log', saved_meal_id=sm.id) }}" class="guard-double-submit">
-            <input type="hidden" name="next" value="{{ url_for('index') }}">
-            <button class="btn btn-outline-success btn-sm" title="Log this now">
-              {{ sm.name }}
-              <span class="text-muted">({{ sm.calories or '?' }} kcal)</span>
-            </button>
+      <div class="tab-content">
+        <div class="tab-pane fade show active" id="meal-tab-pane" role="tabpanel">
+          <form id="quickMealForm" action="{{ url_for('meals.new') }}" enctype="multipart/form-data">
+            <div class="modal-body">
+              <div id="quickMealError" class="alert alert-danger py-2" hidden></div>
+              <label class="form-label">What did you eat?</label>
+              <div class="input-group">
+                <textarea name="description" id="quickMealInput" class="form-control" rows="2"
+                          placeholder="e.g. Grilled chicken, rice, and a side salad"></textarea>
+                <button type="button" class="btn btn-outline-secondary" id="quickMealMicBtn" title="Speak what you ate">
+                  <i class="bi bi-mic"></i>
+                </button>
+              </div>
+              <div class="form-text" id="quickMealHeard">Tap the mic and say what you ate, or type it in.</div>
+              <div class="mt-3">
+                <label class="form-label">Photo (optional)</label>
+                <input type="file" name="photo" id="quickMealPhoto" accept="image/*" capture="environment" class="form-control">
+                <img id="quickMealPhotoPreview" class="img-fluid rounded mt-2" style="max-height: 160px;" hidden>
+              </div>
+              <div class="mt-3">
+                <label class="form-label">Meal type (optional)</label>
+                <select name="meal_type" id="quickMealType" class="form-select">
+                  <option value="">—</option>
+                  <option value="breakfast">Breakfast</option>
+                  <option value="lunch">Lunch</option>
+                  <option value="dinner">Dinner</option>
+                  <option value="snack">Snack</option>
+                  <option value="alcohol">Alcohol</option>
+                </select>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="quickMealCancelBtn">Cancel</button>
+              <button type="submit" class="btn btn-success" id="quickMealSubmitBtn"><i class="bi bi-stars me-1"></i>Estimate with AI</button>
+            </div>
           </form>
-        {% else %}
-          <span class="text-muted small">
-            No quick drinks saved yet — <a href="{{ url_for('meals.quick_drinks') }}">add one</a>.
-          </span>
-        {% endfor %}
-      </div>
-      <div class="modal-footer">
-        <a href="{{ url_for('meals.quick_drinks') }}" class="small me-auto">Manage drinks</a>
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+        <div class="tab-pane fade" id="drinks-tab-pane" role="tabpanel">
+          <div class="modal-body">
+            {% for sm in saved_drinks %}
+              <!-- No .quick-meal-type field: drinks must never pick up a clock-guessed
+                   meal type, so quick_log() falls back to this saved meal_type (alcohol). -->
+              <form method="post" action="{{ url_for('meals.quick_log', saved_meal_id=sm.id) }}" class="guard-double-submit d-grid mb-2">
+                <input type="hidden" name="next" value="{{ url_for('index') }}">
+                <button class="btn btn-outline-success btn-lg" type="submit">{{ sm.name }}</button>
+              </form>
+            {% else %}
+              <p class="text-muted mb-0">No quick drinks saved yet — <a href="{{ url_for('meals.quick_drinks') }}">add one</a>.</p>
+            {% endfor %}
+          </div>
+          <div class="modal-footer">
+            <a href="{{ url_for('meals.quick_drinks') }}" class="small me-auto">Manage drinks</a>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -242,9 +234,13 @@
       }
     });
 
+    var mealTabBtn = document.getElementById('meal-tab-btn');
+
     modalEl.addEventListener('shown.bs.modal', function () {
-      descInput.focus();
-      mealType.value = guessMealType();
+      if (document.getElementById('meal-tab-pane').classList.contains('active')) {
+        descInput.focus();
+        mealType.value = guessMealType();
+      }
     });
     modalEl.addEventListener('hidden.bs.modal', function () {
       heard.textContent = defaultHeardText;
@@ -253,6 +249,7 @@
       photoInput.value = '';
       photoPreview.hidden = true;
       mealType.value = '';
+      bootstrap.Tab.getOrCreateInstance(mealTabBtn).show();
     });
 
     var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;

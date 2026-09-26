@@ -11,9 +11,15 @@
     </div>
   {% endif %}
   <div class="col-12 {{ 'col-md-8' if meal.photo_path else '' }}">
-    {% if meal.description %}
-      <p class="text-muted">{{ meal.description }}</p>
-    {% endif %}
+    <div class="mb-3">
+      <label for="reEstDesc" class="form-label small fw-semibold">Description</label>
+      <textarea id="reEstDesc" class="form-control mb-2" rows="3">{{ meal.description or '' }}</textarea>
+      {% if meal.photo_path %}<div class="form-text mb-2">Your photo will also be sent to the AI.</div>{% endif %}
+      <div id="reEstError" class="alert alert-danger py-2 small mb-2" hidden></div>
+      <button id="reEstBtn" type="button" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-arrow-clockwise me-1"></i>Re-estimate with AI
+      </button>
+    </div>
 
     {% if meal.items %}
       <table class="table table-sm">
@@ -107,5 +113,39 @@
     nameField.hidden = !checkbox.checked;
     if (checkbox.checked) document.getElementById('quickMealName').focus();
   });
+
+  (function () {
+    var btn = document.getElementById('reEstBtn');
+    var descEl = document.getElementById('reEstDesc');
+    var errBox = document.getElementById('reEstError');
+
+    btn.addEventListener('click', function () {
+      errBox.hidden = true;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Re-estimating…';
+
+      var fd = new FormData();
+      fd.append('description', descEl.value);
+
+      fetch('{{ url_for("meals.re_estimate", meal_id=meal.id) }}', {
+        method: 'POST',
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+        body: fd,
+      })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok) throw new Error(data.error || 'Re-estimate failed.');
+          return data;
+        });
+      })
+      .then(function (data) { window.location = data.redirect; })
+      .catch(function (err) {
+        errBox.textContent = err.message || 'Re-estimate failed.';
+        errBox.hidden = false;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Re-estimate with AI';
+      });
+    });
+  })();
 </script>
 {% endblock %}

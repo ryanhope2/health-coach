@@ -141,15 +141,26 @@ class SavedMeal(db.Model):
 
 
 class ExerciseEntry(db.Model):
-    """A simple activity log entry: what, how long, notes."""
+    """An activity log entry. exercise_type determines which fields are meaningful:
+      cardio: duration_min + calories_burned
+      sets:   sets + reps + optional weight_lbs
+      hang:   sets + hang_seconds + optional rest_seconds
+      NULL:   legacy row — treat like cardio
+    """
     __tablename__ = "exercise_entries"
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     date = db.Column(db.Date, nullable=False, default=local_today)
     activity = db.Column(db.String(100), nullable=False)
+    exercise_type = db.Column(db.String(20), nullable=True)  # cardio | sets | hang
     duration_min = db.Column(db.Integer)
     calories_burned = db.Column(db.Integer, nullable=True)
+    sets = db.Column(db.Integer, nullable=True)
+    reps = db.Column(db.Integer, nullable=True)
+    weight_lbs = db.Column(db.Numeric(5, 1), nullable=True)
+    hang_seconds = db.Column(db.Integer, nullable=True)
+    rest_seconds = db.Column(db.Integer, nullable=True)
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

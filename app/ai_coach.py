@@ -10,7 +10,7 @@ import anthropic
 
 from .timeutils import local_now, local_today, to_local_date
 
-CHAT_MODEL = "claude-sonnet-4-5"
+CHAT_MODEL = "claude-sonnet-4-6"
 MAX_TOOL_ROUNDS = 5
 
 SYSTEM_PROMPT = """You are a supportive, knowledgeable fitness and nutrition coach embedded in a \
@@ -35,12 +35,20 @@ name; day-of-week arithmetic is exactly the kind of thing that's easy to get sub
 getting it wrong here means blending in days from last week or claiming credit for days that \
 haven't happened yet. When the user asks how they're doing "this week," only count entries dated \
 from that Sunday through today — never days later in the week (they haven't happened), and never \
-days before that Sunday (that's last week).
+days before that Sunday (that's last week). Exercise days are counted by unique calendar dates — \
+two workouts logged on the same day count as ONE exercise day, not two. Count distinct dates, \
+not log entries.
 
-When the user reports something loggable in conversation (a weight, a meal they ate, a workout, a \
-measurement, a new goal), call the matching tool right away instead of just acknowledging it in text. \
-Never say you've logged, saved, or recorded something unless you actually called the tool that turn — \
-if you didn't call a tool, you didn't log anything, so don't claim otherwise.
+When the user reports something loggable in their current message (a weight, a meal they ate, a \
+workout, a measurement, a new goal), call the matching tool right away instead of just acknowledging \
+it in text. The conversation history shown above is a record of what has already happened and been \
+logged in previous turns — do NOT re-log anything from earlier messages in this thread; only log \
+from the new message you are replying to right now. Never say you've logged, saved, or recorded \
+something unless you actually called the tool that turn — if you didn't call a tool, you didn't log \
+anything, so don't claim otherwise. Critically: if the user is correcting a mistake you made — \
+disputing your count, pointing out a wrong date, questioning your summary — that is NOT a log \
+request. Do not call any tool in response to a correction. Just acknowledge the error, correct your \
+answer, and move on.
 
 Units: weight in lbs, measurements in inches, dates as YYYY-MM-DD (default to today if the user \
 doesn't say). For meals described in words rather than a photo, estimate calories/protein/carbs/fat \
@@ -50,6 +58,13 @@ no quantity at all, unclear which measurement they mean), ask a quick clarifying
 guessing wildly or refusing. Any drink (beer, wine, a cocktail, a shot) is its own category — always \
 log it with meal_type "alcohol", never breakfast/lunch/dinner/snack, no matter what time of day it \
 was.
+
+After logging a meal or drink with log_meal, always include in your reply: (1) the calories and \
+protein you logged for that specific entry, and (2) the updated running total for the day — calories \
+and protein so far today, compared against the daily targets if they're set. Use the data already in \
+context for existing entries; add the just-logged values to get the new totals. Keep it brief — a \
+single line like "That's 450 kcal / 32g protein. You're at 1,200 kcal / 85g protein today (target: \
+1,800 kcal / 150g)" is the right amount of detail.
 
 You also have a persistent memory, separate from the visible conversation: "Notes" below (if any) \
 are things you've saved about this user's health journey that stay with them forever, not just for \
@@ -106,7 +121,9 @@ TOOLS = [
         "description": "Log a meal (or drink) the user describes in conversation. Estimate the "
                         "nutrition yourself from the description before calling this. Use "
                         "meal_type 'alcohol' for any beer/wine/cocktail/liquor, regardless of "
-                        "what time of day it was, rather than breakfast/lunch/dinner/snack.",
+                        "what time of day it was, rather than breakfast/lunch/dinner/snack. "
+                        "Before calling, check today's meals in the context — if an identical or "
+                        "very similar meal is already listed there, do not log it again.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -122,14 +139,28 @@ TOOLS = [
     },
     {
         "name": "log_exercise",
-        "description": "Log a workout or activity the user did.",
+        "description": (
+            "Log a workout or activity the user did. exercise_type determines which fields apply: "
+            "'cardio' (Peloton, running, etc.) uses duration_min + calories_burned; "
+            "'sets' (curls, pushups, sit-ups, etc.) uses sets + reps + optional weight_lbs; "
+            "'hang' (bar hang training) uses sets + hang_seconds + optional rest_seconds. "
+            "For bodyweight exercises like pushups/sit-ups use exercise_type='sets' with no weight_lbs. "
+            "Before calling, check the exercise data in context — if the same activity on the same "
+            "date is already shown there, do not log it again."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "date": {"type": "string", "description": "YYYY-MM-DD, defaults to today"},
-                "activity": {"type": "string"},
-                "duration_min": {"type": "number"},
-                "calories_burned": {"type": "number"},
+                "activity": {"type": "string", "description": "Name of the activity, e.g. 'Peloton', 'Curls', 'Bar hang'"},
+                "exercise_type": {"type": "string", "enum": ["cardio", "sets", "hang"]},
+                "duration_min": {"type": "number", "description": "For cardio: total duration in minutes"},
+                "calories_burned": {"type": "number", "description": "For cardio: calories burned"},
+                "sets": {"type": "number", "description": "For sets/hang: number of sets or hangs"},
+                "reps": {"type": "number", "description": "For sets: reps per set"},
+                "weight_lbs": {"type": "number", "description": "For sets: weight used in lbs (omit for bodyweight)"},
+                "hang_seconds": {"type": "number", "description": "For hang: seconds per hang"},
+                "rest_seconds": {"type": "number", "description": "For hang: rest between hangs in seconds"},
                 "notes": {"type": "string"},
             },
             "required": ["activity"],
@@ -279,14 +310,26 @@ def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
             if not activity:
                 return {"error": "activity is required"}
             d = _parse_date_or_today(tool_input.get("date"))
-            db.session.add(ExerciseEntry(
+            exercise_type = tool_input.get("exercise_type") or "cardio"
+            entry = ExerciseEntry(
                 user_id=user_id, date=d, activity=activity,
-                duration_min=tool_input.get("duration_min"),
-                calories_burned=tool_input.get("calories_burned"),
+                exercise_type=exercise_type,
                 notes=tool_input.get("notes"),
-            ))
+            )
+            if exercise_type == "sets":
+                entry.sets = tool_input.get("sets")
+                entry.reps = tool_input.get("reps")
+                entry.weight_lbs = tool_input.get("weight_lbs")
+            elif exercise_type == "hang":
+                entry.sets = tool_input.get("sets")
+                entry.hang_seconds = tool_input.get("hang_seconds")
+                entry.rest_seconds = tool_input.get("rest_seconds")
+            else:
+                entry.duration_min = tool_input.get("duration_min")
+                entry.calories_burned = tool_input.get("calories_burned")
+            db.session.add(entry)
             db.session.commit()
-            return {"success": True, "date": str(d), "activity": activity}
+            return {"success": True, "date": str(d), "activity": activity, "exercise_type": exercise_type}
 
         if name == "set_goal":
             goal_type = tool_input.get("goal_type")
@@ -359,7 +402,8 @@ def build_context_summary(user) -> str:
     lines = [
         f"User: {user.label}",
         f"Current date/time: {now_local.strftime('%A, %B %-d, %Y at %-I:%M %p %Z')}",
-        f"Current week (Sun-Sat): {week_start} to {week_end} — today is day "
+        f"Current week (Sun-Sat): {week_start} ({week_start.strftime('%A')}) to "
+        f"{week_end} ({week_end.strftime('%A')}) — today is day "
         f"{(today - week_start).days + 1} of 7",
     ]
 
@@ -384,7 +428,7 @@ def build_context_summary(user) -> str:
     if recent_stats:
         lines.append("\nWeight / body fat (last 60 days, oldest to newest):")
         for s in recent_stats:
-            lines.append(f"  {s.date}: weight={_fmt(s.weight_lbs, ' lbs')}, body_fat={_fmt(s.body_fat_pct, '%')}")
+            lines.append(f"  {s.date} ({s.date.strftime('%A')}): weight={_fmt(s.weight_lbs, ' lbs')}, body_fat={_fmt(s.body_fat_pct, '%')}")
 
     recent_measurements = (
         Measurement.query.filter_by(user_id=user.id)
@@ -395,7 +439,7 @@ def build_context_summary(user) -> str:
     if recent_measurements:
         lines.append("\nMeasurements (last 90 days):")
         for m in recent_measurements:
-            lines.append(f"  {m.date}: {m.metric}={m.value_in} in")
+            lines.append(f"  {m.date} ({m.date.strftime('%A')}): {m.metric}={m.value_in} in")
 
     recent_meals = (
         MealEntry.query.filter_by(user_id=user.id, status="confirmed")
@@ -412,22 +456,34 @@ def build_context_summary(user) -> str:
             totals["calories"] += m.calories or 0
             totals["protein"] += float(m.protein_g or 0)
         for d, totals in sorted(by_day.items()):
-            lines.append(f"  {d}: {totals['calories']} kcal, {totals['protein']:.0f}g protein")
+            lines.append(f"  {d} ({d.strftime('%A')}): {totals['calories']} kcal, {totals['protein']:.0f}g protein")
 
-        # Line-item detail for today only (not the full 14 days, to keep context size
-        # reasonable) — daily totals alone don't let the coach comment on what was
-        # actually eaten (e.g. low-protein breakfast, a snack that was mostly carbs).
-        todays_meals = [m for m in recent_meals if to_local_date(m.logged_at) == today]
-        if todays_meals:
-            lines.append("\nToday's meals in detail:")
-            for m in todays_meals:
-                label = (m.meal_type or "meal").capitalize()
-                desc = m.description or "(no description)"
-                lines.append(
-                    f"  [{label}] {desc} — {_fmt(m.calories, ' kcal')}, "
-                    f"{_fmt(m.protein_g, 'g protein')}, {_fmt(m.carbs_g, 'g carbs')}, "
-                    f"{_fmt(m.fat_g, 'g fat')}"
-                )
+        # Line-item detail for the last 3 days (today + yesterday + day before).
+        # Daily totals alone don't let the coach comment on what was actually eaten,
+        # and showing descriptions for recent days also lets the coach recognize items
+        # already logged in earlier conversation turns so it doesn't re-log them.
+        detail_cutoff = today - timedelta(days=2)
+        recent_detail_meals = [m for m in recent_meals if to_local_date(m.logged_at) >= detail_cutoff]
+        if recent_detail_meals:
+            by_day_detail: dict = {}
+            for m in recent_detail_meals:
+                by_day_detail.setdefault(to_local_date(m.logged_at), []).append(m)
+            for d in sorted(by_day_detail.keys(), reverse=True):
+                if d == today:
+                    day_label = f"Today ({d})"
+                elif d == today - timedelta(days=1):
+                    day_label = f"Yesterday ({d})"
+                else:
+                    day_label = f"{d} ({d.strftime('%A')})"
+                lines.append(f"\n{day_label} meals in detail:")
+                for m in by_day_detail[d]:
+                    label = (m.meal_type or "meal").capitalize()
+                    desc = m.description or "(no description)"
+                    lines.append(
+                        f"  [{label}] {desc} — {_fmt(m.calories, ' kcal')}, "
+                        f"{_fmt(m.protein_g, 'g protein')}, {_fmt(m.carbs_g, 'g carbs')}, "
+                        f"{_fmt(m.fat_g, 'g fat')}"
+                    )
 
     recent_exercise = (
         ExerciseEntry.query.filter_by(user_id=user.id)
@@ -436,18 +492,46 @@ def build_context_summary(user) -> str:
         .all()
     )
     if recent_exercise:
-        lines.append("\nExercise (last 14 days):")
-        for e in recent_exercise:
-            lines.append(
-                f"  {e.date}: {e.activity}, {_fmt(e.duration_min, ' min')}"
+        this_week = [e for e in recent_exercise if e.date >= week_start]
+        prior = [e for e in recent_exercise if e.date < week_start]
+
+        def _fmt_exercise(e):
+            if e.exercise_type == "sets":
+                detail = f"{e.sets or '?'}×{e.reps or '?'}"
+                if e.weight_lbs:
+                    detail += f" @ {e.weight_lbs} lbs"
+                else:
+                    detail += " (bodyweight)"
+            elif e.exercise_type == "hang":
+                detail = f"{e.sets or '?'}× {e.hang_seconds or '?'}s"
+                if e.rest_seconds:
+                    detail += f" ({e.rest_seconds}s rest)"
+            else:
+                detail = _fmt(e.duration_min, " min")
+                if e.calories_burned:
+                    detail += f", {e.calories_burned} cal burned"
+            return (
+                f"  {e.date} ({e.date.strftime('%A')}): {e.activity}, {detail}"
                 + (f" — {e.notes}" if e.notes else "")
             )
+
+        lines.append(f"\nExercise — this week ({week_start} to {week_end}), {len(this_week)} day(s) so far:")
+        if this_week:
+            for e in this_week:
+                lines.append(_fmt_exercise(e))
+        else:
+            lines.append("  (none yet this week)")
+
+        if prior:
+            lines.append("Prior exercise (last 14 days):")
+            for e in prior:
+                lines.append(_fmt_exercise(e))
 
     active_goals = Goal.query.filter_by(user_id=user.id, is_active=True).all()
     if active_goals:
         lines.append("\nActive goals:")
         for g in active_goals:
-            target_date = f" by {g.target_date}" if g.target_date else ""
+            target_date = f" by {g.target_date} ({g.target_date.strftime('%A')})" if g.target_date else ""
             lines.append(f"  {g.goal_type}: target {g.target_value}{target_date} (starting from {g.starting_value})")
 
     if len(lines) == 1:

@@ -32,16 +32,66 @@ def new():
         return redirect(url_for("exercise.index"))
 
     entry_date = _parse_date(request.form.get("date")) or local_today()
-    duration = _parse_int(request.form.get("duration_min"))
-    calories_burned = _parse_int(request.form.get("calories_burned"))
+    exercise_type = request.form.get("exercise_type") or "cardio"
     notes = request.form.get("notes", "").strip() or None
 
-    db.session.add(ExerciseEntry(
+    entry = ExerciseEntry(
         user_id=_current_user_id(), date=entry_date, activity=activity,
-        duration_min=duration, calories_burned=calories_burned, notes=notes,
-    ))
+        exercise_type=exercise_type, notes=notes,
+    )
+
+    if exercise_type == "sets":
+        entry.sets = _parse_int(request.form.get("sets"))
+        entry.reps = _parse_int(request.form.get("reps"))
+        entry.weight_lbs = _parse_float(request.form.get("weight_lbs"))
+    elif exercise_type == "hang":
+        entry.sets = _parse_int(request.form.get("sets"))
+        entry.hang_seconds = _parse_int(request.form.get("hang_seconds"))
+        entry.rest_seconds = _parse_int(request.form.get("rest_seconds"))
+    else:
+        entry.duration_min = _parse_int(request.form.get("duration_min"))
+        entry.calories_burned = _parse_int(request.form.get("calories_burned"))
+
+    db.session.add(entry)
     db.session.commit()
     flash("Logged.", "success")
+    return redirect(url_for("exercise.index"))
+
+
+@exercise_bp.route("/<int:entry_id>/edit", methods=["POST"])
+def edit(entry_id):
+    entry = ExerciseEntry.query.filter_by(id=entry_id, user_id=_current_user_id()).first_or_404()
+
+    activity = request.form.get("activity", "").strip()
+    if not activity:
+        flash("Enter an activity.", "error")
+        return redirect(url_for("exercise.index"))
+
+    exercise_type = request.form.get("exercise_type") or "cardio"
+    entry.date = _parse_date(request.form.get("date")) or entry.date
+    entry.activity = activity
+    entry.exercise_type = exercise_type
+    entry.notes = request.form.get("notes", "").strip() or None
+
+    # Clear all type-specific fields, then set only the ones for the current type
+    entry.duration_min = entry.calories_burned = None
+    entry.sets = entry.reps = entry.weight_lbs = None
+    entry.hang_seconds = entry.rest_seconds = None
+
+    if exercise_type == "sets":
+        entry.sets = _parse_int(request.form.get("sets"))
+        entry.reps = _parse_int(request.form.get("reps"))
+        entry.weight_lbs = _parse_float(request.form.get("weight_lbs"))
+    elif exercise_type == "hang":
+        entry.sets = _parse_int(request.form.get("sets"))
+        entry.hang_seconds = _parse_int(request.form.get("hang_seconds"))
+        entry.rest_seconds = _parse_int(request.form.get("rest_seconds"))
+    else:
+        entry.duration_min = _parse_int(request.form.get("duration_min"))
+        entry.calories_burned = _parse_int(request.form.get("calories_burned"))
+
+    db.session.commit()
+    flash("Updated.", "success")
     return redirect(url_for("exercise.index"))
 
 
@@ -59,6 +109,15 @@ def _parse_int(raw):
         return None
     try:
         return int(float(raw))
+    except ValueError:
+        return None
+
+
+def _parse_float(raw):
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return float(raw)
     except ValueError:
         return None
 
