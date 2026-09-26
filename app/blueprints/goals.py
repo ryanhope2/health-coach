@@ -3,7 +3,9 @@ from datetime import date, datetime
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 
 from ..extensions import db
-from ..models import (GOAL_TYPES, BodyStat, Goal, Measurement, User)
+from ..models import (GOAL_TYPES, BodyStat, Goal, Measurement, TrackingPeriod, User)
+from ..progress import goal_baseline, period_position
+from ..timeutils import local_today
 
 goals_bp = Blueprint("goals", __name__, url_prefix="/goals")
 
@@ -30,15 +32,21 @@ def _latest_value(user_id, goal_type):
 @goals_bp.route("/")
 def index():
     user = User.query.get(_current_user_id())
+    period = user.current_period()
     goals = Goal.query.filter_by(user_id=user.id).order_by(Goal.is_active.desc(), Goal.created_at.desc()).all()
     for g in goals:
         g.current_value = _latest_value(user.id, g.goal_type)
-    return render_template("goals/index.html", user=user, goals=goals, goal_types=GOAL_TYPES)
+        g.baseline = goal_baseline(g)
+    return render_template(
+        "goals/index.html", user=user, goals=goals, goal_types=GOAL_TYPES,
+        period=period,
+        position=period_position(period, local_today()) if period else None,
+    )
 
 
 @goals_bp.route("/new", methods=["POST"])
 def new():
-    user_id = _current_user_id()
+    user = User.query.get(_current_user_id())
     goal_type = request.form.get("goal_type")
     if goal_type not in GOAL_TYPES:
         flash("Unknown goal type.", "error")
@@ -49,12 +57,17 @@ def new():
         flash("Enter a target value.", "error")
         return redirect(url_for("goals.index"))
 
-    target_date = _parse_date(request.form.get("target_date"))
-    starting_value = _latest_value(user_id, goal_type)
+    # Goals belong to the current period and default to finishing when it does.
+    period = user.current_period()
+    if period and not period.contains(local_today()):
+        period = None
+    target_date = _parse_date(request.form.get("target_date")) or (period.end_date if period else None)
+    starting_value = _latest_value(user.id, goal_type)
 
     db.session.add(Goal(
-        user_id=user_id, goal_type=goal_type, target_value=target_value,
-        starting_value=starting_value, target_date=target_date, is_active=True,
+        user_id=user.id, period_id=period.id if period else None, goal_type=goal_type,
+        target_value=target_value, starting_value=starting_value, target_date=target_date,
+        is_active=True,
     ))
     db.session.commit()
     flash("Goal added.", "success")
@@ -80,23 +93,55 @@ def delete(goal_id):
     return redirect(url_for("goals.index"))
 
 
-@goals_bp.route("/targets", methods=["POST"])
-def update_targets():
-    user = User.query.get(_current_user_id())
-    user.daily_calorie_target = _parse_int(request.form.get("daily_calorie_target"))
-    user.daily_protein_target_g = _parse_float(request.form.get("daily_protein_target_g"))
-    db.session.commit()
-    flash("Targets updated.", "success")
+@goals_bp.route("/period/<int:period_id>", methods=["POST"])
+def update_period(period_id):
+    period = TrackingPeriod.query.filter_by(id=period_id, user_id=_current_user_id()).first_or_404()
+    error = _apply_period_form(period)
+    if error:
+        flash(error, "error")
+    else:
+        db.session.commit()
+        flash("Period updated.", "success")
     return redirect(url_for("goals.index"))
 
 
-@goals_bp.route("/period", methods=["POST"])
-def update_period():
-    user = User.query.get(_current_user_id())
-    user.tracking_period_start = _parse_date(request.form.get("tracking_period_start"))
+@goals_bp.route("/period/new", methods=["POST"])
+def new_period():
+    period = TrackingPeriod(user_id=_current_user_id())
+    error = _apply_period_form(period)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("goals.index"))
+    db.session.add(period)
     db.session.commit()
-    flash("Tracking period updated.", "success")
+    flash(f'Started "{period.name}".', "success")
     return redirect(url_for("goals.index"))
+
+
+def _apply_period_form(period):
+    """Copy the period form onto `period`; returns an error message instead if invalid."""
+    name = (request.form.get("name") or "").strip()
+    start = _parse_date(request.form.get("start_date"))
+    end = _parse_date(request.form.get("end_date"))
+    if not name or not start or not end:
+        return "A period needs a name, start date, and end date."
+    if end < start:
+        return "The end date has to be after the start date."
+    overlapping = (
+        TrackingPeriod.query.filter_by(user_id=_current_user_id())
+        .filter(TrackingPeriod.id != period.id,
+                TrackingPeriod.start_date <= end, TrackingPeriod.end_date >= start)
+        .first()
+    )
+    if overlapping:
+        return f'Those dates overlap "{overlapping.name}" ({overlapping.start_date} to {overlapping.end_date}).'
+    period.name = name
+    period.start_date = start
+    period.end_date = end
+    period.daily_calorie_target = _parse_int(request.form.get("daily_calorie_target"))
+    period.daily_protein_target_g = _parse_float(request.form.get("daily_protein_target_g"))
+    period.weekly_exercise_days_target = _parse_int(request.form.get("weekly_exercise_days_target"))
+    return None
 
 
 def _parse_float(raw):

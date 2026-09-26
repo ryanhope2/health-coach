@@ -112,6 +112,7 @@ def index():
                 "entries": group_entries,
                 "calories": sum(x.calories or 0 for x in group_entries),
                 "protein": sum(float(x.protein_g or 0) for x in group_entries),
+                "drinks": sum(x.drink_count for x in group_entries),
             }
             for mt, group_entries in sorted(by_type.items(), key=lambda kv: _meal_type_sort_key(kv[0]))
         ]
@@ -213,6 +214,7 @@ def new():
     meal.protein_g = result.get("total_protein_g")
     meal.carbs_g = result.get("total_carbs_g")
     meal.fat_g = result.get("total_fat_g")
+    meal.drinks = result.get("drinks") or None
     meal.ai_raw_response = result.get("_raw_text")
     for item in result.get("items", []):
         db.session.add(FoodItem(
@@ -239,6 +241,7 @@ def review(meal_id):
         meal.protein_g = _parse_float(request.form.get("protein_g"))
         meal.carbs_g = _parse_float(request.form.get("carbs_g"))
         meal.fat_g = _parse_float(request.form.get("fat_g"))
+        meal.drinks = (_parse_float(request.form.get("drinks")) or 1) if meal.meal_type == "alcohol" else None
         logged_at = _parse_logged_date(request.form.get("logged_date"))
         if logged_at is not None:
             meal.logged_at = logged_at
@@ -308,6 +311,7 @@ def re_estimate(meal_id):
     meal.protein_g = result.get("total_protein_g")
     meal.carbs_g = result.get("total_carbs_g")
     meal.fat_g = result.get("total_fat_g")
+    meal.drinks = result.get("drinks") or None
     meal.ai_raw_response = result.get("_raw_text")
     FoodItem.query.filter_by(meal_id=meal.id).delete()
     for item in result.get("items", []):
@@ -340,10 +344,12 @@ def photo(meal_id):
 def quick_log(saved_meal_id):
     """Instantly log a saved meal as-is — no AI call, just reuses its stored nutrition."""
     sm = SavedMeal.query.filter_by(id=saved_meal_id, user_id=_current_user_id()).first_or_404()
+    meal_type = request.form.get("meal_type") or sm.meal_type
     db.session.add(MealEntry(
         user_id=_current_user_id(),
         description=sm.description or sm.name,
-        meal_type=request.form.get("meal_type") or sm.meal_type,
+        meal_type=meal_type,
+        drinks=1 if meal_type == "alcohol" else None,
         calories=sm.calories,
         protein_g=sm.protein_g,
         carbs_g=sm.carbs_g,

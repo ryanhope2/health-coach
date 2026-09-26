@@ -44,7 +44,7 @@
       <div class="row g-2">
         <div class="col-6 col-md-3">
           <label class="form-label small">Meal type</label>
-          <select name="meal_type" class="form-select">
+          <select name="meal_type" class="form-select" id="mealTypeSelect">
             <option value="" {{ 'selected' if not meal.meal_type else '' }}>—</option>
             <option value="breakfast" {{ 'selected' if meal.meal_type == 'breakfast' else '' }}>Breakfast</option>
             <option value="lunch" {{ 'selected' if meal.meal_type == 'lunch' else '' }}>Lunch</option>
@@ -52,6 +52,11 @@
             <option value="snack" {{ 'selected' if meal.meal_type == 'snack' else '' }}>Snack</option>
             <option value="alcohol" {{ 'selected' if meal.meal_type == 'alcohol' else '' }}>Alcohol</option>
           </select>
+        </div>
+        <div class="col-6 col-md-3" id="drinksField" {{ '' if meal.meal_type == 'alcohol' else 'hidden' }}>
+          <label class="form-label small">Drinks</label>
+          <input type="number" step="0.5" min="0.5" name="drinks" class="form-control"
+                 value="{{ '%g'|format(meal.drinks) if meal.drinks else 1 }}">
         </div>
         <div class="col-6 col-md-3">
           <label class="form-label small">Date</label>
@@ -107,6 +112,10 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
 <script>
+  document.getElementById('mealTypeSelect').addEventListener('change', function (e) {
+    document.getElementById('drinksField').hidden = e.target.value !== 'alcohol';
+  });
+
   var checkbox = document.getElementById('saveAsQuickMeal');
   var nameField = document.getElementById('quickMealNameField');
   checkbox.addEventListener('change', function () {

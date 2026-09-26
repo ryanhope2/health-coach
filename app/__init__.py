@@ -77,6 +77,7 @@ def create_app(config=None):
 
     @app.route("/")
     def index():
+        from . import progress
         from .models import BodyStat, ChatMessage, ExerciseEntry, MealEntry, SavedMeal, User
         from .timeutils import local_today, to_local_date
 
@@ -91,23 +92,10 @@ def create_app(config=None):
                 .first()
             )
 
+        period = user.current_period()
+
         def period_baseline(field):
-            """Average of readings in the first 7 days of user.tracking_period_start.
-            Returns None if no period is set or no readings fall in that window."""
-            if not user.tracking_period_start:
-                return None
-            from datetime import timedelta
-            window_end = user.tracking_period_start + timedelta(days=6)
-            rows = (
-                BodyStat.query.filter_by(user_id=user.id)
-                .filter(field.isnot(None),
-                        BodyStat.date >= user.tracking_period_start,
-                        BodyStat.date <= window_end)
-                .all()
-            )
-            if not rows:
-                return None
-            return sum(float(getattr(r, field.key)) for r in rows) / len(rows)
+            return progress.period_baseline(user.id, period, field.key)
 
         def prior_entry_val(field, latest_row):
             """Fallback: value from the most recent entry before the latest one."""
@@ -181,7 +169,8 @@ def create_app(config=None):
         }
         exercise_days = [{"date": d, "done": d in exercised_dates} for d in week_dates]
         exercise_count = sum(1 for d in exercise_days if d["done"])
-        if exercise_count >= 4:
+        exercise_target = (period.weekly_exercise_days_target if period else None) or 4
+        if exercise_count >= exercise_target:
             exercise_color = "green"
         elif exercise_count >= 2:
             exercise_color = "yellow"
@@ -207,6 +196,7 @@ def create_app(config=None):
         return render_template(
             "index.html",
             user=user,
+            period=period,
             latest_weight=latest_weight,
             weight_trend=weight_trend,
             latest_bf=latest_bf,

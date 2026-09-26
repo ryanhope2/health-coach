@@ -36,45 +36,38 @@
 
   <div class="col-12 col-lg-6">
     <div class="card">
-      <div class="card-header">Daily nutrition targets</div>
+      <div class="card-header d-flex justify-content-between">
+        <span>Current period</span>
+        {% if position %}
+          <span class="text-muted small">
+            {% if position.ended %}ended{% else %}week {{ position.week }} of {{ position.total_weeks }} · {{ position.days_left }} days left{% endif %}
+          </span>
+        {% endif %}
+      </div>
       <div class="card-body">
-        <form method="post" action="{{ url_for('goals.update_targets') }}" class="row g-2 guard-double-submit">
-          <div class="col-6">
-            <label class="form-label small">Calories / day</label>
-            <input type="number" name="daily_calorie_target" class="form-control" value="{{ user.daily_calorie_target or '' }}">
+        {% if period %}
+          {% with form_action=url_for('goals.update_period', period_id=period.id), submit_label='Save period', prefill=none %}
+            {% include "goals/_period_form.html" %}
+          {% endwith %}
+          <div class="form-text mt-2">
+            Weight and body-fat baselines are the average of your readings in the period's first 7 days.
           </div>
-          <div class="col-6">
-            <label class="form-label small">Protein (g) / day</label>
-            <input type="number" step="0.1" name="daily_protein_target_g" class="form-control" value="{{ user.daily_protein_target_g or '' }}">
-          </div>
-          <div class="col-12">
-            <button class="btn btn-outline-success">Save targets</button>
-          </div>
-        </form>
+        {% else %}
+          <p class="text-muted mb-0">No period set up yet — start one below.</p>
+        {% endif %}
       </div>
     </div>
   </div>
 
   <div class="col-12 col-lg-6">
-    <div class="card">
-      <div class="card-header">Tracking period</div>
+    <details class="card" {{ 'open' if not period or position.ended else '' }}>
+      <summary class="card-header">Start a new period</summary>
       <div class="card-body">
-        <form method="post" action="{{ url_for('goals.update_period') }}" class="row g-2 guard-double-submit">
-          <div class="col-8">
-            <label class="form-label small">Period start date</label>
-            <input type="date" name="tracking_period_start" class="form-control"
-                   value="{{ user.tracking_period_start.strftime('%Y-%m-%d') if user.tracking_period_start else '' }}">
-          </div>
-          <div class="col-4 d-flex align-items-end">
-            <button class="btn btn-outline-success w-100">Save</button>
-          </div>
-        </form>
-        <div class="form-text mt-2">
-          Sets the baseline for the weight &amp; body fat trend shown on the dashboard —
-          average of the first 7 days of logged readings from this date.
-        </div>
+        {% with form_action=url_for('goals.new_period'), submit_label='Start period', prefill=period, period=none %}
+          {% include "goals/_period_form.html" %}
+        {% endwith %}
       </div>
-    </div>
+    </details>
   </div>
 </div>
 
@@ -85,7 +78,7 @@
         <div>
           <strong>{{ g.goal_type|goal_label }}</strong>
           — target {{ g.target_value }}{% if g.target_date %} by {{ g.target_date }}{% endif %}
-          {% if g.starting_value %}<span class="small">(started at {{ g.starting_value }})</span>{% endif %}
+          {% if g.baseline is not none %}<span class="small">(started at {{ g.baseline }})</span>{% endif %}
           {% if g.current_value is not none %}<span class="small">— currently {{ g.current_value }}</span>{% endif %}
           {% if not g.is_active %}<span class="badge bg-success ms-1">Achieved</span>{% endif %}
         </div>

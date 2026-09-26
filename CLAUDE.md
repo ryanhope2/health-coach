@@ -51,12 +51,14 @@ Flask app  (wsgi.py → app/__init__.py)
 | `app/models.py` | All SQLAlchemy models |
 | `app/meal_ai.py` | Claude Vision + text nutrition estimation for meals |
 | `app/ai_coach.py` | AI coach: builds a context summary from logged data, calls Claude |
+| `app/progress.py` | Period-level math shared by dashboard/goals/coach: first-week baselines, Sun-Sat week start, "week N of M" position |
 | `app/timeutils.py` | `USER_TIMEZONE` + local-time/local-date helpers used everywhere "today" or a day boundary matters |
 | `app/blueprints/body.py` | Weight, body fat %, and measurements (waist/hips/chest/bicep/thigh) |
 | `app/blueprints/meals.py` | Log a meal (photo/text/quick-repeat), AI parse, review/confirm, history |
 | `app/blueprints/exercise.py` | Simple activity log (type, duration, notes) |
 | `app/blueprints/goals.py` | Targets for weight/body-fat/measurements + daily calorie/protein targets |
 | `app/blueprints/coach.py` | AI coach chat + `/coach/notes` CRUD for persistent memory |
+| `migrate_periods.py` | One-time (re-runnable) migration: `tracking_periods` table, `goals.period_id`, `meal_entries.drinks`, seeds the first period from the old `User` columns |
 | `init_db.py` | Create tables, seed the first user from `AUTH_USERNAME`/`AUTH_PASSWORD` |
 | `manage.py` | CLI to add a user / reset a password / list users (no UI for this yet) |
 | `cleanup_photos.py` | Deletes meal photos older than `PHOTO_RETENTION_DAYS` (run daily via cron) |
@@ -68,13 +70,28 @@ Flask app  (wsgi.py → app/__init__.py)
 
 ## Data Model (app/models.py)
 
-- **User** — username/password (hashed), display name, daily calorie/protein targets.
-  Auth is real per-user accounts (not vibe-split's single shared login) so a friend's
+- **User** — username/password (hashed), display name. (Daily targets and
+  `tracking_period_start` used to live here; those columns still exist in SQLite but are
+  unmapped — see `TrackingPeriod`.) `user.current_period()` returns the most recently
+  started period, so between periods the last one's targets keep applying. Auth is real per-user accounts (not vibe-split's single shared login) so a friend's
   data stays private when they're added later.
+- **TrackingPeriod** — a training cycle (e.g. "Fall 2026", Sep 11 → Thanksgiving) with
+  name/start/end and its own daily calorie/protein targets and weekly exercise-days
+  target. Periods are core to how the user works: goals belong to one (`Goal.period_id`,
+  defaulting their target date to the period end), and targets live on the period rather
+  than `User` so past weeks are judged against the targets that applied then. Periods
+  can't overlap (validated in `goals._apply_period_form`). Weight/body-fat "starting
+  values" everywhere are the **average of the period's first 7 days** of readings
+  (`progress.period_baseline()`), not the single reading stored in `Goal.starting_value`
+  — daily scale readings swing 1-2 lb and several body-fat points, too noisy to anchor on.
 - **BodyStat** — one row per day: weight_lbs and/or body_fat_pct + notes
 - **Measurement** — one row per (date, metric) — metric is one of waist/hips/chest/bicep/thigh
 - **MealEntry** — a logged meal: description, optional photo, calories/protein/carbs/fat,
-  status (`pending` while awaiting confirmation after AI parse, `confirmed` once saved)
+  status (`pending` while awaiting confirmation after AI parse, `confirmed` once saved),
+  and `drinks` for alcohol entries — how many drinks the entry is as the user would count
+  them (2 glasses of wine = 2, half a glass = 0.5), set by the AI parse / coach `log_meal`
+  tool / review form, and 1 for quick-drink presets. Use `MealEntry.drink_count` rather
+  than the column: it returns 0 for non-alcohol and 1 if `drinks` is unset
 - **FoodItem** — individual food items within a meal, as parsed/edited
 - **SavedMeal** — a reusable meal template (name + nutrition) for one-tap re-logging of
   meals eaten repeatedly; not itself a logged meal, see Meal Logging Flow below

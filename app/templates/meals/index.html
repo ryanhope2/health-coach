@@ -104,7 +104,7 @@
           <details class="mb-1"{{ ' open' if day.is_today else '' }}>
             <summary class="d-flex justify-content-between" style="cursor: pointer;">
               <span>{{ group.label }}</span>
-              <span class="text-muted small">{{ group.calories }} kcal · {{ "%.0f"|format(group.protein) }}g protein</span>
+              <span class="text-muted small">{% if group.drinks %}{{ "%g"|format(group.drinks) }} drink{{ '' if group.drinks == 1 else 's' }} · {% endif %}{{ group.calories }} kcal · {{ "%.0f"|format(group.protein) }}g protein</span>
             </summary>
             <div class="ps-3 mt-1">
               {% for e in group.entries %}

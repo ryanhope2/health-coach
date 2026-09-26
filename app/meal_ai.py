@@ -34,12 +34,14 @@ PARSE_PROMPT = """Estimate the nutrition for this meal. Return ONLY valid JSON w
   "total_protein_g": number,
   "total_carbs_g": number,
   "total_fat_g": number,
+  "drinks": number,
   "confidence": 0.0-1.0
 }
 
 Rules:
 - Break the meal into distinct items rather than one lump entry, when there's more than one component
 - All numeric fields are estimates in normal units (calories in kcal, macros in grams)
+- drinks is how many alcoholic drinks this is, as a person would count them (2 glasses of wine = 2, half a glass = 0.5, one cocktail = 1); 0 if there's no alcohol
 - confidence reflects how certain you are given what was provided (a clear photo + description is high confidence; a vague description is lower)
 - Return ONLY the JSON object, no other text
 
@@ -108,7 +110,7 @@ def parse_meal(api_key: str, photo_path: str | None = None, text_description: st
 
     if "items" not in result or not isinstance(result["items"], list):
         result["items"] = []
-    for field in ("total_calories", "total_protein_g", "total_carbs_g", "total_fat_g"):
+    for field in ("total_calories", "total_protein_g", "total_carbs_g", "total_fat_g", "drinks"):
         val = result.get(field)
         if val is not None:
             try:

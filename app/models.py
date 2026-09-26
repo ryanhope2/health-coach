@@ -28,9 +28,9 @@ class User(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     display_name = db.Column(db.String(100))
-    daily_calorie_target = db.Column(db.Integer, nullable=True)
-    daily_protein_target_g = db.Column(db.Numeric(5, 1), nullable=True)
-    tracking_period_start = db.Column(db.Date, nullable=True)
+    # daily_calorie_target / daily_protein_target_g / tracking_period_start columns still
+    # exist in the users table but are no longer mapped — superseded by TrackingPeriod,
+    # which migrate_periods.py seeded from them.
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     body_stats = db.relationship("BodyStat", back_populates="user", cascade="all, delete-orphan")
@@ -41,10 +41,47 @@ class User(db.Model):
     goals = db.relationship("Goal", back_populates="user", cascade="all, delete-orphan")
     chat_messages = db.relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
     coach_notes = db.relationship("CoachNote", back_populates="user", cascade="all, delete-orphan")
+    periods = db.relationship("TrackingPeriod", back_populates="user", cascade="all, delete-orphan")
 
     @property
     def label(self):
         return self.display_name or self.username
+
+    def current_period(self):
+        """The most recently started period — the one containing today, or, between
+        periods, the one that just ended (so its targets keep applying until a new one
+        is created). None if the user has never set one up."""
+        return (
+            TrackingPeriod.query.filter_by(user_id=self.id)
+            .filter(TrackingPeriod.start_date <= local_today())
+            .order_by(TrackingPeriod.start_date.desc())
+            .first()
+        )
+
+
+class TrackingPeriod(db.Model):
+    """
+    A training cycle (e.g. Sep 11 -> Thanksgiving) with its own daily targets. Goals
+    belong to a period, and targets live here rather than on User so past weeks are
+    always judged against the targets that applied at the time.
+    """
+    __tablename__ = "tracking_periods"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    daily_calorie_target = db.Column(db.Integer, nullable=True)
+    daily_protein_target_g = db.Column(db.Numeric(5, 1), nullable=True)
+    weekly_exercise_days_target = db.Column(db.Integer, nullable=True, default=4)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", back_populates="periods")
+    goals = db.relationship("Goal", back_populates="period")
+
+    def contains(self, d):
+        return self.start_date <= d <= self.end_date
 
 
 class BodyStat(db.Model):
@@ -94,11 +131,20 @@ class MealEntry(db.Model):
     fat_g = db.Column(db.Numeric(5, 1))
     status = db.Column(db.String(20), default="pending", nullable=False)
     # status: pending (AI-parsed, awaiting confirm) | confirmed
+    drinks = db.Column(db.Numeric(3, 1), nullable=True)  # alcohol only: servings, e.g. 2 or 0.5
     ai_raw_response = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     user = db.relationship("User", back_populates="meals")
     items = db.relationship("FoodItem", back_populates="meal", cascade="all, delete-orphan")
+
+    @property
+    def drink_count(self) -> float:
+        """Drinks this entry counts for — 0 for anything that isn't alcohol, and 1 for an
+        alcohol entry that predates the drinks column or never had it set."""
+        if self.meal_type != "alcohol":
+            return 0.0
+        return float(self.drinks) if self.drinks is not None else 1.0
 
 
 class FoodItem(db.Model):
@@ -173,6 +219,7 @@ class Goal(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    period_id = db.Column(db.Integer, db.ForeignKey("tracking_periods.id"), nullable=True)
     goal_type = db.Column(db.String(20), nullable=False)  # one of GOAL_TYPES
     target_value = db.Column(db.Numeric(6, 1), nullable=False)
     starting_value = db.Column(db.Numeric(6, 1), nullable=True)
@@ -182,6 +229,7 @@ class Goal(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     user = db.relationship("User", back_populates="goals")
+    period = db.relationship("TrackingPeriod", back_populates="goals")
 
 
 class CoachNote(db.Model):

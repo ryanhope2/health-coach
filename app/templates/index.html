@@ -13,7 +13,7 @@
       {% endif %}
     </div>
     <div role="button" data-bs-toggle="modal" data-bs-target="#quickMealModal" title="Tap to log a meal">
-      <strong>{{ today_calories }}</strong><span class="text-muted">/{{ user.daily_calorie_target or '—' }} kcal</span>
+      <strong>{{ today_calories }}</strong><span class="text-muted">/{{ period.daily_calorie_target if period and period.daily_calorie_target else '—' }} kcal</span>
     </div>
     <div class="dots" title="{{ exercise_days|selectattr('done')|list|length }} of 7 days exercised this week (Sun-Sat)">
       {% for d in exercise_days %}
@@ -29,7 +29,7 @@
       {% endif %}
     </div>
     <div role="button" data-bs-toggle="modal" data-bs-target="#quickMealModal" title="Tap to log a meal">
-      <strong>{{ "%.0f"|format(today_protein) }}</strong><span class="text-muted">/{{ user.daily_protein_target_g or '—' }}g</span>
+      <strong>{{ "%.0f"|format(today_protein) }}</strong><span class="text-muted">/{{ period.daily_protein_target_g if period and period.daily_protein_target_g else '—' }}g</span>
     </div>
   </div>
 

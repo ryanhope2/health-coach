@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 import anthropic
 
+from .progress import goal_baseline, period_baseline, period_position
 from .timeutils import local_now, local_today, to_local_date
 
 CHAT_MODEL = "claude-sonnet-4-6"
@@ -133,6 +134,9 @@ TOOLS = [
                 "protein_g": {"type": "number"},
                 "carbs_g": {"type": "number"},
                 "fat_g": {"type": "number"},
+                "drinks": {"type": "number", "description": "meal_type 'alcohol' only: how many "
+                           "drinks this entry is, as the user would count them — 2 glasses of wine "
+                           "= 2, half a glass = 0.5, one cocktail = 1. Defaults to 1."},
             },
             "required": ["description", "calories", "protein_g"],
         },
@@ -168,8 +172,9 @@ TOOLS = [
     },
     {
         "name": "set_goal",
-        "description": "Set a target for weight, body fat %, or a measurement. Captures the user's "
-                        "most recent logged value as the starting point automatically.",
+        "description": "Set a target for weight, body fat %, or a measurement. It belongs to the "
+                        "current tracking period and defaults to that period's end date if no "
+                        "target_date is given.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -182,7 +187,7 @@ TOOLS = [
     },
     {
         "name": "set_nutrition_targets",
-        "description": "Set the user's daily calorie and/or protein targets.",
+        "description": "Set the daily calorie and/or protein targets for the current tracking period.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -292,10 +297,12 @@ def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
             protein_g = tool_input.get("protein_g")
             if calories is None or protein_g is None:
                 return {"error": "calories and protein_g are required"}
+            meal_type = tool_input.get("meal_type")
             db.session.add(MealEntry(
                 user_id=user_id,
                 description=tool_input.get("description"),
-                meal_type=tool_input.get("meal_type"),
+                meal_type=meal_type,
+                drinks=(tool_input.get("drinks") or 1) if meal_type == "alcohol" else None,
                 calories=round(calories),
                 protein_g=protein_g,
                 carbs_g=tool_input.get("carbs_g"),
@@ -343,19 +350,25 @@ def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
                 except ValueError:
                     target_date = None
             starting = _latest_value(user_id, goal_type)
+            period = User.query.get(user_id).current_period()
+            if period and not period.contains(local_today()):
+                period = None
             db.session.add(Goal(
-                user_id=user_id, goal_type=goal_type, target_value=target,
-                starting_value=starting, target_date=target_date, is_active=True,
+                user_id=user_id, period_id=period.id if period else None, goal_type=goal_type,
+                target_value=target, starting_value=starting,
+                target_date=target_date or (period.end_date if period else None), is_active=True,
             ))
             db.session.commit()
             return {"success": True, "goal_type": goal_type, "target_value": target, "starting_value": starting}
 
         if name == "set_nutrition_targets":
-            user = User.query.get(user_id)
+            period = User.query.get(user_id).current_period()
+            if not period:
+                return {"error": "No tracking period exists yet — the user needs to create one on the Goals page first."}
             if "daily_calorie_target" in tool_input:
-                user.daily_calorie_target = round(tool_input["daily_calorie_target"])
+                period.daily_calorie_target = round(tool_input["daily_calorie_target"])
             if "daily_protein_target_g" in tool_input:
-                user.daily_protein_target_g = tool_input["daily_protein_target_g"]
+                period.daily_protein_target_g = tool_input["daily_protein_target_g"]
             db.session.commit()
             return {"success": True}
 
@@ -413,10 +426,25 @@ def build_context_summary(user) -> str:
         for n in notes:
             lines.append(f"  [{n.key}] {n.content}")
 
-    if user.daily_calorie_target or user.daily_protein_target_g:
+    period = user.current_period()
+    if period:
+        pos = period_position(period, today)
+        status = ("ended" if pos["ended"]
+                  else f"week {pos['week']} of {pos['total_weeks']}, {pos['days_left']} days left")
         lines.append(
-            f"Daily targets: {_fmt(user.daily_calorie_target, ' kcal')}, "
-            f"{_fmt(user.daily_protein_target_g, 'g protein')}"
+            f"\nCurrent tracking period: \"{period.name}\", {period.start_date} to {period.end_date} ({status})"
+        )
+        baselines = [
+            f"{label} {value:.1f}{unit}"
+            for label, field, unit in (("weight", "weight_lbs", " lbs"), ("body fat", "body_fat_pct", "%"))
+            if (value := period_baseline(user.id, period, field)) is not None
+        ]
+        if baselines:
+            lines.append(f"Period baseline (average of first 7 days): {', '.join(baselines)}")
+        lines.append(
+            f"Daily targets: {_fmt(period.daily_calorie_target, ' kcal')}, "
+            f"{_fmt(period.daily_protein_target_g, 'g protein')}; "
+            f"exercise target {_fmt(period.weekly_exercise_days_target, ' days/week')}"
         )
 
     recent_stats = (
@@ -452,11 +480,13 @@ def build_context_summary(user) -> str:
         by_day = {}
         for m in recent_meals:
             d = to_local_date(m.logged_at)
-            totals = by_day.setdefault(d, {"calories": 0, "protein": 0})
+            totals = by_day.setdefault(d, {"calories": 0, "protein": 0, "drinks": 0})
             totals["calories"] += m.calories or 0
             totals["protein"] += float(m.protein_g or 0)
+            totals["drinks"] += m.drink_count
         for d, totals in sorted(by_day.items()):
-            lines.append(f"  {d} ({d.strftime('%A')}): {totals['calories']} kcal, {totals['protein']:.0f}g protein")
+            drinks = f", {totals['drinks']:g} drink(s)" if totals["drinks"] else ""
+            lines.append(f"  {d} ({d.strftime('%A')}): {totals['calories']} kcal, {totals['protein']:.0f}g protein{drinks}")
 
         # Line-item detail for the last 3 days (today + yesterday + day before).
         # Daily totals alone don't let the coach comment on what was actually eaten,
@@ -478,6 +508,8 @@ def build_context_summary(user) -> str:
                 lines.append(f"\n{day_label} meals in detail:")
                 for m in by_day_detail[d]:
                     label = (m.meal_type or "meal").capitalize()
+                    if m.meal_type == "alcohol":
+                        label += f", {m.drink_count:g} drink(s)"
                     desc = m.description or "(no description)"
                     lines.append(
                         f"  [{label}] {desc} — {_fmt(m.calories, ' kcal')}, "
@@ -532,7 +564,7 @@ def build_context_summary(user) -> str:
         lines.append("\nActive goals:")
         for g in active_goals:
             target_date = f" by {g.target_date} ({g.target_date.strftime('%A')})" if g.target_date else ""
-            lines.append(f"  {g.goal_type}: target {g.target_value}{target_date} (starting from {g.starting_value})")
+            lines.append(f"  {g.goal_type}: target {g.target_value}{target_date} (starting from {goal_baseline(g)})")
 
     if len(lines) == 1:
         lines.append("\n(No data logged yet — encourage the user to start logging weight, meals, and exercise.)")
