@@ -97,9 +97,8 @@
 
   {# This week so far #}
   {% if this_week %}
-    <div class="d-flex justify-content-between align-items-baseline small text-muted mb-2">
-      <span>This week · {{ this_week.first.strftime('%a %-m/%-d') }}–{{ this_week.last.strftime('%a %-m/%-d') }}</span>
-      <span>calories count finished days only</span>
+    <div class="small text-muted mb-2">
+      This week · {{ this_week.first.strftime('%a %-m/%-d') }}–{{ this_week.last.strftime('%a %-m/%-d') }}
     </div>
     <div class="stat-tiles mb-3">
       <div class="stat-tile">
