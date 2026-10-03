@@ -42,6 +42,25 @@ Flask app  (wsgi.py → app/__init__.py)
 
 ---
 
+## Testing — red → green, always
+
+**Use the `tdd` skill (`.claude/skills/tdd/SKILL.md`) for every feature, bug fix, or behavior
+change.** Write the test first, run it and see it fail for the right reason, make the
+smallest change that passes, then run the whole suite green. A bug report starts with a
+test that reproduces it. No feature or fix is done without a test that was red first.
+
+- Run: `./run test` (pytest, ~3s). `./run deploy` runs it first and won't deploy on a failure.
+- Layout: `tests/unit/` (pure functions), `tests/integration/` (DB, no HTTP),
+  `tests/routes/` (test client). Fixtures in `tests/conftest.py`, row builders in
+  `tests/builders.py`, scripted fake Anthropic client in `tests/fakes.py`.
+- Every test runs on a temp DB + temp instance dir with a frozen clock (`clock.at(...)`, in
+  Eastern time), and real Anthropic calls are blocked.
+- Dev dependencies live in `requirements-dev.txt`
+  (`.venv/bin/pip install -r requirements-dev.txt`); the server only installs
+  `requirements.txt`.
+
+---
+
 ## Key Files
 
 | File | Purpose |
@@ -51,7 +70,7 @@ Flask app  (wsgi.py → app/__init__.py)
 | `app/models.py` | All SQLAlchemy models |
 | `app/meal_ai.py` | Claude Vision + text nutrition estimation for meals |
 | `app/ai_coach.py` | AI coach: builds a context summary from logged data, calls Claude |
-| `app/progress.py` | Period-level math shared by dashboard/goals/coach: first-week baselines, Sun-Sat week start, "week N of M" position |
+| `app/progress.py` | Period-level math shared by dashboard/goals/coach: first-week baselines, Sun-Sat week start, "week N of M" position, exercise-dot slack color (`exercise_week_status`) |
 | `app/timeutils.py` | `USER_TIMEZONE` + local-time/local-date helpers used everywhere "today" or a day boundary matters |
 | `app/blueprints/body.py` | Weight, body fat %, and measurements (waist/hips/chest/bicep/thigh) |
 | `app/blueprints/meals.py` | Log a meal (photo/text/quick-repeat), AI parse, review/confirm, history |
@@ -69,6 +88,8 @@ Flask app  (wsgi.py → app/__init__.py)
 | `run` | Bash deploy helper (same shape as vibe-split's) |
 | `moronfitness.service` | Systemd unit file |
 | `nginx-moronfitness.conf` | Nginx config (HTTPS, proxies to :5003) |
+| `tests/` | pytest suite — see Testing above and `.claude/skills/tdd/SKILL.md` |
+| `requirements-dev.txt` | Test-only deps (pytest, time-machine, beautifulsoup4) |
 
 ---
 
@@ -144,6 +165,10 @@ Applied to every form that creates or updates a record via a plain POST:
 - `body/index.html` — Log weight/body fat, Log a measurement (the latter had the same
   real duplicate-row risk; the former is upsert-by-date so a double-click was always
   data-safe, just silently wasteful and equally confusing to use)
+- `index.html` — the dashboard's quick weight modal (same upsert-by-date as above; it was
+  missed originally and caught by `tests/routes/test_forms.py`, which now fails for any
+  record-writing form without the guard). Its own `normalizeFields` submit handler runs
+  alongside — neither cancels the first submit, so they compose fine
 - `goals/index.html` — Add a goal (real risk), Daily nutrition targets (idempotent
   overwrite, not a risk)
 - `meals/index.html` — each Quick meals button (real risk — `quick_log()` has no dedup)
@@ -250,7 +275,9 @@ Colored as a group, not per-dot, by how much slack is left to reach the weekly t
 (period's `weekly_exercise_days_target`, default 4): days that can still count (rest of the
 week, plus today if not yet exercised) minus sessions still needed. 2+ spare days green,
 1 spare yellow, 0 spare red; target already met is green. A single workout on Sunday is
-green, not red — the color answers "am I on track," not "how many so far."
+green, not red — the color answers "am I on track," not "how many so far." The week and
+color are computed by `progress.exercise_week_status()` (a pure function, unit-tested case
+by case in `tests/unit/test_exercise_week_status.py`); the route only queries the dates.
 
 Tapping the dots opens `quickExerciseModal` — the same cardio/sets/hang form as `/exercise/`
 (date defaults to today but is editable, for logging an earlier day), posting to
@@ -529,7 +556,11 @@ UTC midnight). Fixed by building the loose bounds as full `datetime` values via
 `datetime.combine(d, datetime.min.time())` instead of comparing bare dates against a
 `DateTime` column. Caught by directly comparing the dashboard's and `/meals/`'s today
 totals against each other in production before considering the fix done — they should
-always agree exactly, and initially didn't.
+always agree exactly, and initially didn't. The coach's 14-day meal window had the
+same bug as a *lower* bound (`logged_at >= <bare date>` cuts at UTC midnight = 8pm
+Eastern), pulling a 15th day's evening into context as a partial "daily total" that read
+like a near-fast; the test suite caught it and it now uses the same loose-bound +
+`to_local_date()` pattern.
 
 **No data migration was needed.** Every affected UTC timestamp was already a correct
 absolute instant — only the *read-side* logic that turned it into a calendar day was
@@ -667,7 +698,8 @@ Reuses the `vibesplit` SSH alias — see `deploy/hosts.ini` in vibe-split for th
 ### `./run` script commands
 
 ```bash
-./run deploy      # rsync code + pip install + systemctl restart
+./run test        # run the test suite locally (extra args go to pytest)
+./run deploy      # run tests, then rsync code + pip install + systemctl restart
 ./run sync        # rsync code only (no restart)
 ./run restart     # systemctl restart moronfitness
 ./run setup       # first-time provisioning: venv, systemd, nginx (HTTP), cron

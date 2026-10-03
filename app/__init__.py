@@ -13,8 +13,10 @@ from .blueprints.progress import progress_bp
 from .extensions import db
 
 
-def create_app(config=None):
-    app = Flask(__name__, instance_relative_config=True)
+def create_app(config=None, instance_path=None):
+    # instance_path lets tests point the DB, photos, and config.py at a temp dir instead
+    # of the real instance/ folder.
+    app = Flask(__name__, instance_relative_config=True, instance_path=instance_path)
 
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-secret-change-me"),
@@ -28,10 +30,12 @@ def create_app(config=None):
     if config:
         app.config.from_mapping(config)
 
-    try:
-        app.config.from_pyfile("config.py")
-    except FileNotFoundError:
-        pass
+    # Skipped under test so a local instance/config.py can never repoint tests at a real DB.
+    if not app.config.get("TESTING"):
+        try:
+            app.config.from_pyfile("config.py")
+        except FileNotFoundError:
+            pass
 
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(os.path.join(app.instance_path, "photos", "meals"), exist_ok=True)
@@ -160,29 +164,15 @@ def create_app(config=None):
 
         # Exercise this week: fixed Sunday-through-Saturday calendar week, not a
         # rolling trailing-7-days window.
-        days_since_sunday = (today.weekday() + 1) % 7
-        week_start = today - timedelta(days=days_since_sunday)
-        week_dates = [week_start + timedelta(days=i) for i in range(7)]
+        week_start = progress.week_start(today)
         exercised_dates = {
             e.date for e in
             ExerciseEntry.query.filter_by(user_id=user.id)
-            .filter(ExerciseEntry.date >= week_start, ExerciseEntry.date <= week_dates[-1])
+            .filter(ExerciseEntry.date >= week_start, ExerciseEntry.date <= week_start + timedelta(days=6))
             .all()
         }
-        exercise_days = [{"date": d, "done": d in exercised_dates} for d in week_dates]
-        exercise_count = sum(1 for d in exercise_days if d["done"])
-        exercise_target = (period.weekly_exercise_days_target if period else None) or 4
-        # Color = how much slack is left to still reach the target this week:
-        # days that can still count (rest of the week, plus today if not yet
-        # exercised) minus sessions still needed. 2+ spare days green, 1 yellow,
-        # none red; target already met is green.
-        needed = exercise_target - exercise_count
-        if needed <= 0:
-            exercise_color = "green"
-        else:
-            days_left = 6 - days_since_sunday + (0 if today in exercised_dates else 1)
-            slack = days_left - needed
-            exercise_color = "green" if slack >= 2 else "yellow" if slack == 1 else "red"
+        exercise = progress.exercise_week_status(
+            today, exercised_dates, period.weekly_exercise_days_target if period else None)
 
         recent_chat = (
             ChatMessage.query.filter_by(user_id=user.id)
@@ -210,8 +200,8 @@ def create_app(config=None):
             bf_trend=bf_trend,
             today_calories=today_calories,
             today_protein=today_protein,
-            exercise_days=exercise_days,
-            exercise_color=exercise_color,
+            exercise_days=exercise["days"],
+            exercise_color=exercise["color"],
             messages=recent_chat,
             today=today.isoformat(),
             saved_drinks=saved_drinks,

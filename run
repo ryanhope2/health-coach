@@ -23,6 +23,11 @@ RSYNC_ARGS=(
     --exclude='__pycache__'
     --exclude='*.pyc'
     --exclude='.env.example'
+    --exclude='tests'
+    --exclude='.pytest_cache'
+    --exclude='pytest.ini'
+    --exclude='requirements-dev.txt'
+    --exclude='.claude'
 )
 
 sync_files() {
@@ -30,17 +35,35 @@ sync_files() {
     rsync "${RSYNC_ARGS[@]}" "$LOCAL_PATH/" "$SERVER:$REMOTE_PATH/"
 }
 
+run_tests() {
+    echo "→ Running tests ..."
+    if ! "$LOCAL_PATH/.venv/bin/pytest" -q -p no:cacheprovider "$@"; then
+        echo "✗ Tests failed — not deploying. Fix them, or re-run with --skip-tests to override."
+        exit 1
+    fi
+}
+
 cmd="${1:-help}"
 
 case "$cmd" in
 
     deploy)
+        if [[ "${2:-}" == "--skip-tests" ]]; then
+            echo "⚠ Skipping tests (--skip-tests)"
+        else
+            run_tests
+        fi
         sync_files
         echo "→ Installing/upgrading dependencies ..."
         ssh "$SERVER" "cd $REMOTE_PATH && .venv/bin/pip install -q -r requirements.txt"
         echo "→ Restarting $SERVICE ..."
         ssh "$SERVER" "sudo systemctl restart $SERVICE"
         echo "✓ Deployed"
+        ;;
+
+    test)
+        shift
+        "$LOCAL_PATH/.venv/bin/pytest" "$@"
         ;;
 
     sync)
@@ -112,8 +135,12 @@ case "$cmd" in
         echo ""
         echo "  Usage: ./run <command>"
         echo ""
+        echo "  Develop"
+        echo "    test [args]  Run the test suite (extra args go to pytest, e.g. -k meals)"
+        echo ""
         echo "  Deploy"
-        echo "    deploy       Sync files + pip install + restart service"
+        echo "    deploy       Run tests, then sync files + pip install + restart service"
+        echo "                 (--skip-tests to deploy anyway)"
         echo "    sync         Sync files only (no restart)"
         echo "    restart      Restart service only (no file sync)"
         echo ""

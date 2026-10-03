@@ -47,6 +47,30 @@ def week_start(d):
     return d - timedelta(days=(d.weekday() + 1) % 7)
 
 
+DEFAULT_EXERCISE_DAYS_TARGET = 4
+
+
+def exercise_week_status(today, exercised_dates, target):
+    """
+    The dashboard's exercise dots: the Sun-Sat week containing today, which days had a
+    workout, and a color for how much slack is left to still reach the target — days that
+    can still count (rest of the week, plus today if not yet exercised) minus sessions
+    still needed. 2+ spare days green, 1 yellow, none red; target already met is green.
+    """
+    start = week_start(today)
+    dates = [start + timedelta(days=i) for i in range(7)]
+    days = [{"date": d, "done": d in exercised_dates} for d in dates]
+    count = sum(1 for d in days if d["done"])
+    needed = (target or DEFAULT_EXERCISE_DAYS_TARGET) - count
+    if needed <= 0:
+        color = "green"
+    else:
+        days_left = 6 - (today - start).days + (0 if today in exercised_dates else 1)
+        slack = days_left - needed
+        color = "green" if slack >= 2 else "yellow" if slack == 1 else "red"
+    return {"days": days, "count": count, "color": color}
+
+
 def period_position(period, today):
     """Week N of M (Sun-Sat weeks overlapping the period, so partial first/last weeks count)
     and days left, for headers and the coach context."""

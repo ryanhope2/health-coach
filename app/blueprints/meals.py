@@ -91,8 +91,10 @@ def index():
 
     # Day-based pagination: find which calendar days (not rows) to show. `before` (a
     # YYYY-MM-DD string) pages further back in time via "Show earlier days".
-    before = request.args.get("before")
-    before_date = datetime.strptime(before, "%Y-%m-%d").date() if before else None
+    try:
+        before_date = datetime.strptime(request.args.get("before", ""), "%Y-%m-%d").date()
+    except ValueError:
+        before_date = None  # missing or unreadable -> first page
     all_days_desc = sorted(by_day.keys(), reverse=True)
     if before_date:
         all_days_desc = [d for d in all_days_desc if d < before_date]

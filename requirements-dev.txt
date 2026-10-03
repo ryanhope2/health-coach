@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8.0
+time-machine>=2.16
+beautifulsoup4>=4.12

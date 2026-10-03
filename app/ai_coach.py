@@ -419,6 +419,7 @@ def build_context_summary(user) -> str:
         f"{week_end} ({week_end.strftime('%A')}) — today is day "
         f"{(today - week_start).days + 1} of 7",
     ]
+    header_lines = len(lines)
 
     notes = CoachNote.query.filter_by(user_id=user.id).order_by(CoachNote.updated_at.desc()).all()
     if notes:
@@ -469,12 +470,18 @@ def build_context_summary(user) -> str:
         for m in recent_measurements:
             lines.append(f"  {m.date} ({m.date.strftime('%A')}): {m.metric}={m.value_in} in")
 
-    recent_meals = (
+    # logged_at is naive UTC, so comparing it to a bare date cuts at UTC midnight (8pm
+    # Eastern) — that pulled the evening of a 15th day in as a partial "daily total" that
+    # read like a near-fast. Loose datetime bound in SQL, exact local-day cut in Python.
+    meal_cutoff = today - timedelta(days=14)
+    recent_meals = [
+        m for m in
         MealEntry.query.filter_by(user_id=user.id, status="confirmed")
-        .filter(MealEntry.logged_at >= today - timedelta(days=14))
+        .filter(MealEntry.logged_at >= datetime.combine(meal_cutoff - timedelta(days=1), datetime.min.time()))
         .order_by(MealEntry.logged_at.asc())
         .all()
-    )
+        if to_local_date(m.logged_at) >= meal_cutoff
+    ]
     if recent_meals:
         lines.append("\nMeals (last 14 days, daily totals):")
         by_day = {}
@@ -573,7 +580,7 @@ def build_context_summary(user) -> str:
             target_date = f" by {g.target_date} ({g.target_date.strftime('%A')})" if g.target_date else ""
             lines.append(f"  {g.goal_type}: target {g.target_value}{target_date} (starting from {goal_baseline(g)})")
 
-    if len(lines) == 1:
+    if len(lines) == header_lines:
         lines.append("\n(No data logged yet — encourage the user to start logging weight, meals, and exercise.)")
 
     return "\n".join(lines)
