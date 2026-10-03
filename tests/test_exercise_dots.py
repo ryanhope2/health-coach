@@ -1,18 +1,16 @@
 """Dashboard exercise-dot color: slack toward the weekly target, not a raw count.
 
-Run with: .venv/bin/python -m unittest discover -s tests -v
+Run with: .venv/bin/python -m unittest discover -t . -s tests -v
 """
 import re
-import tempfile
 import unittest
 from datetime import date, timedelta
 from unittest import mock
 
-from werkzeug.security import generate_password_hash
-
-from app import create_app
 from app.extensions import db
-from app.models import ExerciseEntry, TrackingPeriod, User
+from app.models import ExerciseEntry, TrackingPeriod
+
+from .base import AppTestCase
 
 SUNDAY = date(2026, 9, 27)  # a Sunday; the week runs 9/27 - 10/3
 
@@ -21,27 +19,7 @@ def day(offset):
     return SUNDAY + timedelta(days=offset)
 
 
-class ExerciseDotColorTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.NamedTemporaryFile(suffix=".db")
-        self.app = create_app({
-            "SQLALCHEMY_DATABASE_URI": "sqlite:///" + self.tmp.name,
-            "TESTING": True,
-        })
-        with self.app.app_context():
-            db.create_all()
-            user = User(username="t", password_hash=generate_password_hash("x"))
-            db.session.add(user)
-            db.session.flush()
-            self.user_id = user.id
-            db.session.commit()
-        self.client = self.app.test_client()
-        with self.client.session_transaction() as s:
-            s["user_id"] = self.user_id
-
-    def tearDown(self):
-        self.tmp.close()
-
+class ExerciseDotColorTest(AppTestCase):
     def _colors(self, today_offset, done_offsets, target=4):
         """Render the dashboard as of SUNDAY+today_offset and return the set of
         dot-color classes on the exercise dots."""

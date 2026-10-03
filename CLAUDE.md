@@ -252,6 +252,13 @@ week, plus today if not yet exercised) minus sessions still needed. 2+ spare day
 1 spare yellow, 0 spare red; target already met is green. A single workout on Sunday is
 green, not red — the color answers "am I on track," not "how many so far."
 
+Tapping the dots opens `quickExerciseModal` — the same cardio/sets/hang form as `/exercise/`
+(date defaults to today but is editable, for logging an earlier day), posting to
+`exercise.new` with `next=/`. `exercise.new` redirects via an allowlisted `_safe_next()`
+(dashboard or `/exercise/`), mirroring `body.py`/`meals.py`. Sets and hang each have their
+own `sets` input, so the modal JS disables the hidden type's inputs — otherwise both would
+submit under the same name.
+
 **Coach widget (`app/templates/coach/_widget.html`):** the dashboard embeds the *same*
 functional chat as the full `/coach/` page — recent messages plus a live send/receive
 input — rather than a static preview, since talking to the coach is the primary way this

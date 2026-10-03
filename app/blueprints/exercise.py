@@ -29,7 +29,7 @@ def new():
     activity = request.form.get("activity", "").strip()
     if not activity:
         flash("Enter an activity.", "error")
-        return redirect(url_for("exercise.index"))
+        return redirect(_safe_next())
 
     entry_date = _parse_date(request.form.get("date")) or local_today()
     exercise_type = request.form.get("exercise_type") or "cardio"
@@ -55,7 +55,7 @@ def new():
     db.session.add(entry)
     db.session.commit()
     flash("Logged.", "success")
-    return redirect(url_for("exercise.index"))
+    return redirect(_safe_next())
 
 
 @exercise_bp.route("/<int:entry_id>/edit", methods=["POST"])
@@ -102,6 +102,14 @@ def delete(entry_id):
     db.session.commit()
     flash("Deleted.", "success")
     return redirect(url_for("exercise.index"))
+
+
+def _safe_next():
+    """Redirect target for new() — allowlisted to avoid an open redirect via `next`."""
+    next_url = request.form.get("next")
+    if next_url in (url_for("index"), url_for("exercise.index")):
+        return next_url
+    return url_for("exercise.index")
 
 
 def _parse_int(raw):

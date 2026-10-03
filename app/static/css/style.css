@@ -100,6 +100,7 @@ body {
   display: flex;
   gap: 4px;
   align-self: center;
+  padding: 10px 0 10px 10px; /* bigger tap target for the modal */
 }
 .vitals .dot {
   width: 9px;

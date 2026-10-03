@@ -15,7 +15,8 @@
     <div role="button" data-bs-toggle="modal" data-bs-target="#quickMealModal" title="Tap to log a meal">
       <strong>{{ today_calories }}</strong><span class="text-muted">/{{ period.daily_calorie_target if period and period.daily_calorie_target else '—' }} kcal</span>
     </div>
-    <div class="dots" title="{{ exercise_days|selectattr('done')|list|length }} of 7 days exercised this week (Sun-Sat)">
+    <div class="dots" role="button" data-bs-toggle="modal" data-bs-target="#quickExerciseModal"
+         title="{{ exercise_days|selectattr('done')|list|length }} of 7 days exercised this week (Sun-Sat) — tap to log a workout">
       {% for d in exercise_days %}
         <span class="dot{{ ' dot-' + exercise_color if d.done and exercise_color else '' }}"></span>
       {% endfor %}
@@ -61,6 +62,86 @@
             <label class="form-label">Body fat % (optional)</label>
             <input type="text" name="body_fat_pct" id="quickBodyFatInput"
                    class="form-control" placeholder="19" autocomplete="off">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="quickExerciseModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('exercise.new') }}" id="quickExerciseForm" class="guard-double-submit">
+        <div class="modal-header">
+          <h5 class="modal-title">Log a workout</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="next" value="{{ url_for('index') }}">
+          <div class="row g-2">
+            <div class="col-12">
+              <div class="btn-group w-100" role="group">
+                <input type="radio" class="btn-check" name="exercise_type" id="qx_type_cardio" value="cardio" checked>
+                <label class="btn btn-outline-primary" for="qx_type_cardio">Cardio</label>
+                <input type="radio" class="btn-check" name="exercise_type" id="qx_type_sets" value="sets">
+                <label class="btn btn-outline-primary" for="qx_type_sets">Sets</label>
+                <input type="radio" class="btn-check" name="exercise_type" id="qx_type_hang" value="hang">
+                <label class="btn btn-outline-primary" for="qx_type_hang">Hang</label>
+              </div>
+            </div>
+            <div class="col-6">
+              <label class="form-label small">Date</label>
+              <input type="date" name="date" class="form-control" value="{{ today }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label small">Activity</label>
+              <input type="text" name="activity" class="form-control" placeholder="e.g. Peloton, Run, Yoga" required autocomplete="off">
+            </div>
+
+            <div class="col-6 qx-fields qx-cardio-fields">
+              <label class="form-label small">Duration (min)</label>
+              <input type="number" name="duration_min" class="form-control" min="1">
+            </div>
+            <div class="col-6 qx-fields qx-cardio-fields">
+              <label class="form-label small">Calories burned</label>
+              <input type="number" name="calories_burned" class="form-control" min="0">
+            </div>
+
+            <div class="col-4 qx-fields qx-sets-fields d-none">
+              <label class="form-label small">Sets</label>
+              <input type="number" name="sets" class="form-control" min="1" placeholder="3" disabled>
+            </div>
+            <div class="col-4 qx-fields qx-sets-fields d-none">
+              <label class="form-label small">Reps</label>
+              <input type="number" name="reps" class="form-control" min="1" placeholder="12">
+            </div>
+            <div class="col-4 qx-fields qx-sets-fields d-none">
+              <label class="form-label small">Weight (lbs)</label>
+              <input type="number" name="weight_lbs" class="form-control" min="0" step="0.5" placeholder="optional">
+            </div>
+
+            <div class="col-4 qx-fields qx-hang-fields d-none">
+              <label class="form-label small">Sets / hangs</label>
+              <input type="number" name="sets" class="form-control" min="1" placeholder="4" disabled>
+            </div>
+            <div class="col-4 qx-fields qx-hang-fields d-none">
+              <label class="form-label small">Hang (sec)</label>
+              <input type="number" name="hang_seconds" class="form-control" min="1" placeholder="45">
+            </div>
+            <div class="col-4 qx-fields qx-hang-fields d-none">
+              <label class="form-label small">Rest (sec)</label>
+              <input type="number" name="rest_seconds" class="form-control" min="0" placeholder="optional">
+            </div>
+
+            <div class="col-12">
+              <label class="form-label small">Notes</label>
+              <input type="text" name="notes" class="form-control" placeholder="How'd it feel?" autocomplete="off">
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -157,6 +238,30 @@
 <script src="{{ url_for('static', filename='js/guess-meal-type.js') }}"></script>
 <script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
 <script src="{{ url_for('static', filename='js/coach-chat.js') }}"></script>
+<script>
+  (function () {
+    var form = document.getElementById('quickExerciseForm');
+    var modalEl = document.getElementById('quickExerciseModal');
+
+    // Sets and hang each have their own "sets" input; only the visible one may be
+    // enabled, or both would submit and the later (hidden) one would win.
+    function showType(type) {
+      form.querySelectorAll('.qx-fields').forEach(function (el) {
+        var show = el.classList.contains('qx-' + type + '-fields');
+        el.classList.toggle('d-none', !show);
+        el.querySelectorAll('input').forEach(function (i) { i.disabled = !show; });
+      });
+    }
+    form.querySelectorAll('[name="exercise_type"]').forEach(function (r) {
+      r.addEventListener('change', function () { showType(r.value); });
+    });
+    showType('cardio');
+
+    modalEl.addEventListener('shown.bs.modal', function () {
+      form.querySelector('[name="activity"]').focus();
+    });
+  })();
+</script>
 <script>
   (function () {
     var modalEl = document.getElementById('quickWeightModal');
