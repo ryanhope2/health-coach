@@ -162,6 +162,9 @@
             <button class="nav-link active" id="meal-tab-btn" data-bs-toggle="tab" data-bs-target="#meal-tab-pane" type="button" role="tab">Meal</button>
           </li>
           <li class="nav-item" role="presentation">
+            <button class="nav-link" id="quick-tab-btn" data-bs-toggle="tab" data-bs-target="#quick-tab-pane" type="button" role="tab">Quick</button>
+          </li>
+          <li class="nav-item" role="presentation">
             <button class="nav-link" id="drinks-tab-btn" data-bs-toggle="tab" data-bs-target="#drinks-tab-pane" type="button" role="tab">Drinks</button>
           </li>
         </ul>
@@ -209,6 +212,37 @@
             </div>
           </form>
         </div>
+        <div class="tab-pane fade" id="quick-tab-pane" role="tabpanel">
+          <div class="modal-body">
+            {% if saved_meals %}
+              <div class="d-flex align-items-center gap-2 mb-3">
+                <label class="form-label mb-0 small" for="quickMealTypeSelect">Log as</label>
+                <select id="quickMealTypeSelect" class="form-select form-select-sm w-auto quick-meal-type-select" aria-label="Meal type">
+                  <option value="breakfast">Breakfast</option>
+                  <option value="lunch">Lunch</option>
+                  <option value="dinner">Dinner</option>
+                  <option value="snack">Snack</option>
+                </select>
+              </div>
+              {% for sm in saved_meals %}
+                <form method="post" action="{{ url_for('meals.quick_log', saved_meal_id=sm.id) }}" class="guard-double-submit d-grid mb-2">
+                  <input type="hidden" name="next" value="{{ url_for('index') }}">
+                  <input type="hidden" name="meal_type" class="quick-meal-type">
+                  <button class="btn btn-outline-success" type="submit">
+                    {{ sm.name }}
+                    <span class="text-muted small">({{ sm.calories or '?' }} kcal{% if sm.protein_g %} / {{ sm.protein_g }}g{% endif %})</span>
+                  </button>
+                </form>
+              {% endfor %}
+            {% else %}
+              <p class="text-muted mb-0">No quick meals saved yet — check "Save as a quick-entry meal" when you confirm a meal.</p>
+            {% endif %}
+          </div>
+          <div class="modal-footer">
+            <a href="{{ url_for('meals.index') }}" class="small me-auto">Manage quick meals</a>
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
         <div class="tab-pane fade" id="drinks-tab-pane" role="tabpanel">
           <div class="modal-body">
             {% for sm in saved_drinks %}
@@ -237,6 +271,7 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/guess-meal-type.js') }}"></script>
 <script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+<script src="{{ url_for('static', filename='js/quick-meal-type.js') }}"></script>
 <script src="{{ url_for('static', filename='js/coach-chat.js') }}"></script>
 <script>
   (function () {

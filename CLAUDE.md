@@ -457,7 +457,8 @@ adding `.quick-meal-type` to a drink button would silently break the whole featu
 re-time-guessing it.
 
 **Dashboard access:** the calories/protein vitals cells open `quickMealModal`, which has
-two tabs — **Meal** (the photo/text AI-parse form) and **Drinks** (the saved drinks as
+three tabs — **Meal** (the photo/text AI-parse form), **Quick** (saved non-alcohol meals as
+one-tap buttons, with a "Log as" meal-type picker), and **Drinks** (the saved drinks as
 one-tap buttons, plus a "Manage drinks" link). This replaced an earlier separate
 "🍸 Log a drink" link + `quickDrinkModal` below `.vitals`; a drink shortcut was never
 worth a 6th cell in the 5-cell grid (see Dashboard Layout below), and a tab keeps it one
@@ -466,6 +467,14 @@ field (same gotcha as above). Logging one needs to return to the
 dashboard, not `/meals/` — so `quick_log()` gained the same allowlisted-redirect pattern
 `body.add_stat()` already uses (`_safe_next()` in `meals.py`, mirroring `body.py`'s): a
 hidden `next` field set to `url_for('index')` on the dashboard's forms only.
+
+**Meal-type picker for quick meals:** a single `.quick-meal-type-select` per page (the Quick
+tab in the dashboard modal, and the "Quick meals" card on `/meals/`) drives every
+`.quick-meal-type` hidden field via `app/static/js/quick-meal-type.js`. It starts at
+`guessMealType()` (and re-guesses each time the modal opens, unless the user already picked
+one) and the user can override it before tapping a meal; `quick_log()` already preferred the
+form's `meal_type` over the saved one. The picker offers breakfast/lunch/dinner/snack only —
+drinks keep the no-`.quick-meal-type` rule above.
 
 The AI coach's `log_meal` tool and system prompt were updated the same way — `"alcohol"`
 added to the tool's `meal_type` enum, with an explicit instruction to use it for any

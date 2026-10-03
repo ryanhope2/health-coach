@@ -192,11 +192,13 @@ def create_app(config=None):
         )
         recent_chat.reverse()
 
-        saved_drinks = (
-            SavedMeal.query.filter_by(user_id=user.id, meal_type="alcohol")
+        all_saved = (
+            SavedMeal.query.filter_by(user_id=user.id)
             .order_by(SavedMeal.last_used_at.desc(), SavedMeal.created_at.desc())
             .all()
         )
+        saved_drinks = [sm for sm in all_saved if sm.meal_type == "alcohol"]
+        saved_meals = [sm for sm in all_saved if sm.meal_type != "alcohol"]
 
         return render_template(
             "index.html",
@@ -213,6 +215,7 @@ def create_app(config=None):
             messages=recent_chat,
             today=today.isoformat(),
             saved_drinks=saved_drinks,
+            saved_meals=saved_meals,
         )
 
     return app
