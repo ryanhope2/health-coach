@@ -3,6 +3,8 @@
 import pytest
 
 from app.ai_coach import build_context_summary
+from app.extensions import db
+from app.models import FoodItem
 from tests.builders import (SUNDAY, day, log_drink, log_meal, log_weight, log_workout,
                             make_goal, make_note, make_period, make_recap)
 
@@ -105,3 +107,56 @@ def test_only_the_users_own_data(user, other_user, clock):
     ctx = build_context_summary(user)
     assert "their secret" not in ctx
     assert "their lunch" not in ctx
+
+
+# --- today so far (server-computed, so the coach never adds it up itself) --------------------
+
+def test_today_so_far_with_targets_and_whats_left(user, clock):
+    clock.at("2026-09-30 21:00")
+    make_period(user, start=day(-14), calories=2000, protein=160)
+    log_meal(user, day(3), "08:00", calories=350, protein=20)   # logged in the app
+    log_meal(user, day(3), "20:30", calories=700, protein=45)   # after UTC midnight
+    log_drink(user, day(3), "20:45", drinks=2, calories=300)
+    log_meal(user, day(2), "21:00", calories=900, protein=50)   # yesterday: not today
+    ctx = build_context_summary(user)
+    assert ("Today so far (Wed 09/30): 1350 kcal, 65g protein, 2 drink(s) — "
+            "targets 2000 kcal / 160g protein, so 650 kcal and 95g protein left") in ctx
+
+
+def test_today_so_far_over_target(user, clock):
+    clock.at("2026-09-30 21:00")
+    make_period(user, start=day(-14), calories=2000, protein=100)
+    log_meal(user, day(3), calories=2300, protein=120)
+    assert "so 300 kcal over and protein target met" in build_context_summary(user)
+
+
+def test_today_so_far_with_nothing_logged_and_no_period(user, clock):
+    clock.at("2026-09-30 09:00")
+    assert "Today so far (Wed 09/30): nothing logged yet" in build_context_summary(user)
+
+
+# --- meal detail lines -------------------------------------------------------------------
+
+def test_meal_lines_show_local_time(user, clock):
+    clock.at("2026-09-30 21:00")
+    log_meal(user, day(3), "20:30", meal_type="dinner", description="tacos")
+    assert "8:30 PM [Dinner] tacos" in build_context_summary(user)
+
+
+def test_photo_only_meal_shows_its_food_items(user, clock):
+    clock.at("2026-09-30 21:00")
+    meal = log_meal(user, day(3), "19:00", meal_type="dinner", description=None)
+    db.session.add_all([FoodItem(meal_id=meal.id, name="salmon"), FoodItem(meal_id=meal.id, name="rice")])
+    db.session.commit()
+    ctx = build_context_summary(user)
+    assert "[Dinner] salmon, rice" in ctx
+    assert "(no description)" not in ctx
+
+
+def test_pending_meals_are_listed_but_not_counted(user, clock):
+    clock.at("2026-09-30 21:00")
+    log_meal(user, day(3), "12:00", calories=500, protein=30)
+    log_meal(user, day(3), "18:00", status="pending", description="unconfirmed pizza", calories=900)
+    ctx = build_context_summary(user)
+    assert "unconfirmed pizza" in section(ctx, "Awaiting review")
+    assert "Today so far (Wed 09/30): 500 kcal" in ctx

@@ -5,7 +5,7 @@ import pytest
 
 from app.ai_coach import _execute_tool
 from app.models import BodyStat, CoachNote, ExerciseEntry, Goal, MealEntry, Measurement
-from tests.builders import day, log_weight, make_note, make_period
+from tests.builders import day, log_meal, log_weight, make_note, make_period
 
 TODAY = "2026-09-30"
 
@@ -70,6 +70,29 @@ def test_alcohol_defaults_to_one_drink(user):
 def test_alcohol_keeps_a_given_drink_count(user):
     run(user, "log_meal", meal_type="alcohol", calories=300, protein_g=0, drinks=2)
     assert MealEntry.query.one().drink_count == 2
+
+
+def test_meal_result_carries_server_computed_day_totals(user):
+    # Includes meals the user logged in the app, so the coach never has to add.
+    make_period(user, start=day(-10), calories=2000, protein=160)
+    log_meal(user, day(3), "08:00", calories=350, protein=20)
+    result = run(user, "log_meal", meal_type="lunch", calories=600, protein_g=40)
+    assert result["date"] == TODAY
+    assert result["day_totals"] == {"calories": 950, "protein_g": 60.0, "drinks": 0}
+    assert result["targets"] == {"calories": 2000, "protein_g": 160.0}
+
+
+def test_meal_can_be_backdated_to_a_local_day(user):
+    result = run(user, "log_meal", meal_type="dinner", calories=800, protein_g=50, date="2026-09-29")
+    from app.timeutils import to_local_date
+    assert to_local_date(MealEntry.query.one().logged_at) == date(2026, 9, 29)
+    assert result["date"] == "2026-09-29"
+    assert result["day_totals"]["calories"] == 800
+
+
+def test_meal_rejects_a_future_date(user):
+    assert "error" in run(user, "log_meal", calories=500, protein_g=30, date="2026-10-01")
+    assert MealEntry.query.count() == 0
 
 
 def test_meal_needs_calories_and_protein(user):

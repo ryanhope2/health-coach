@@ -30,6 +30,12 @@ def to_local_date(naive_utc_dt: datetime) -> date:
     return naive_utc_dt.replace(tzinfo=_UTC).astimezone(USER_TIMEZONE).date()
 
 
+def to_local_time(naive_utc_dt: datetime) -> datetime:
+    """A stored naive-UTC datetime as an aware datetime in the user's timezone — for showing
+    when something happened (e.g. "8:10 PM"), where to_local_date() only gives the day."""
+    return naive_utc_dt.replace(tzinfo=_UTC).astimezone(USER_TIMEZONE)
+
+
 def local_date_to_utc_noon(d: date) -> datetime:
     """Return a naive-UTC datetime representing noon on day `d` in the user's timezone.
     Used when backdating a meal entry — we don't know the actual time, so noon places it
@@ -37,3 +43,11 @@ def local_date_to_utc_noon(d: date) -> datetime:
     entry to the wrong calendar day."""
     local_noon = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=USER_TIMEZONE)
     return local_noon.astimezone(_UTC).replace(tzinfo=None)
+
+
+def logged_at_for(d: date) -> datetime:
+    """logged_at for a meal on local day `d`: right now if `d` is today (keeps the natural
+    order of the day's entries), otherwise noon local on `d` via local_date_to_utc_noon()."""
+    if d == local_today():
+        return datetime.utcnow()
+    return local_date_to_utc_noon(d)

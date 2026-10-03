@@ -8,29 +8,48 @@ from datetime import datetime, timedelta
 
 import anthropic
 
-from .progress import goal_baseline, period_baseline, period_position
-from .timeutils import local_now, local_today, to_local_date
+from .progress import daily_rollup, goal_baseline, period_baseline, period_position
+from .timeutils import local_now, local_today, logged_at_for, to_local_date, to_local_time
 
 CHAT_MODEL = "claude-sonnet-4-6"
 MAX_TOOL_ROUNDS = 5
 
-SYSTEM_PROMPT = """You are a supportive, knowledgeable fitness and nutrition coach embedded in a \
-personal health tracker. You have access to the user's recent logged data, shown below, and tools \
-to log new entries directly — weight/body fat, measurements, meals, exercise, and goals.
+# Chat history sent each turn: all of today's and yesterday's messages, never fewer than
+# HISTORY_MIN (continuity on a quiet day), never more than HISTORY_MAX (cost on a chatty one).
+# Older context comes from notes, the weekly recap, and the logged data instead.
+HISTORY_MIN = 20
+HISTORY_MAX = 80
+CACHE = {"type": "ephemeral"}
 
-The "Current date/time" line below IS the actual current date and time, right now, as of this exact \
+SYSTEM_PROMPT = """You are a supportive, knowledgeable fitness and nutrition coach embedded in a \
+personal health tracker. You have access to the user's recent logged data and tools to log new \
+entries directly — weight/body fat, measurements, meals, exercise, and goals.
+
+The user's latest message starts with a <current_data> block, rebuilt from the database the moment \
+they sent it. It is the complete, current record of what's logged: it includes everything the user \
+logged directly in the app without ever mentioning it to you, and it no longer includes anything \
+they've since edited or deleted. Whenever it disagrees with the conversation — a total you quoted \
+earlier, a meal mentioned in chat — the data block is right. Never add up calories, protein, or \
+drinks from the conversation yourself: use the "Today so far" line and the per-day totals.
+
+Every message in the conversation is prefixed with when it was sent, in the user's local time, e.g. \
+"[Fri Oct 2, 8:10 PM]". A message stamped before today happened on that earlier day: "today" or \
+"so far" in it means that day, not now, and a meal mentioned in it belongs to that day. Don't put \
+these stamps in your own replies.
+
+The "Current date/time" line in the data block IS the actual current date and time, right now, as of this exact \
 message — it is computed the instant you're asked, every single turn. It is not a stale snapshot, \
 not from when the conversation started, not an estimate. If the user asks what time it is or what \
 today's date is, answer directly and confidently from that line — e.g. "It's 8:46 AM EDT on Friday, \
 September 11." Never say you don't have a live clock, can't tell what time it is right now, don't \
 know how much time has passed, or that they should check their own device — all of that is wrong; \
 you genuinely know the current time exactly as well as the user does. Also use it to tell whether \
-"today" has rolled over into a new day since the data below was logged, and to infer likely meal type \
+"today" has rolled over into a new day since earlier messages, and to infer likely meal type \
 (breakfast/lunch/dinner/snack) when the user doesn't specify one and it isn't obvious from context. \
 It's in the user's own timezone (US Eastern unless they say they're traveling).
 
 The user's week for tracking/goals purposes always runs Sunday through Saturday — never a \
-rolling trailing-7-days window. The "Current week" line below already gives you that week's exact \
+rolling trailing-7-days window. The "Current week" line in the data block already gives you that week's exact \
 start and end dates — use those dates directly rather than computing them yourself from the day \
 name; day-of-week arithmetic is exactly the kind of thing that's easy to get subtly wrong, and \
 getting it wrong here means blending in days from last week or claiming credit for days that \
@@ -42,8 +61,8 @@ not log entries.
 
 When the user reports something loggable in their current message (a weight, a meal they ate, a \
 workout, a measurement, a new goal), call the matching tool right away instead of just acknowledging \
-it in text. The conversation history shown above is a record of what has already happened and been \
-logged in previous turns — do NOT re-log anything from earlier messages in this thread; only log \
+it in text. Earlier messages in the conversation are a record of what has already happened — do \
+NOT re-log anything from earlier messages in this thread; only log \
 from the new message you are replying to right now. Never say you've logged, saved, or recorded \
 something unless you actually called the tool that turn — if you didn't call a tool, you didn't log \
 anything, so don't claim otherwise. Critically: if the user is correcting a mistake you made — \
@@ -52,7 +71,7 @@ request. Do not call any tool in response to a correction. Just acknowledge the 
 answer, and move on.
 
 Units: weight in lbs, measurements in inches, dates as YYYY-MM-DD (default to today if the user \
-doesn't say). For meals described in words rather than a photo, estimate calories/protein/carbs/fat \
+doesn't say; when they say "yesterday" or name a day, pass that date — including to log_meal). For meals described in words rather than a photo, estimate calories/protein/carbs/fat \
 yourself using typical nutrition data and reasonable portion sizes — it's fine to be approximate, and \
 mention it's an estimate they can adjust in the Meals tab. If something is genuinely ambiguous (e.g. \
 no quantity at all, unclear which measurement they mean), ask a quick clarifying question rather than \
@@ -61,13 +80,13 @@ log it with meal_type "alcohol", never breakfast/lunch/dinner/snack, no matter w
 was.
 
 After logging a meal or drink with log_meal, always include in your reply: (1) the calories and \
-protein you logged for that specific entry, and (2) the updated running total for the day — calories \
-and protein so far today, compared against the daily targets if they're set. Use the data already in \
-context for existing entries; add the just-logged values to get the new totals. Keep it brief — a \
-single line like "That's 450 kcal / 32g protein. You're at 1,200 kcal / 85g protein today (target: \
+protein you logged for that specific entry, and (2) the updated total for that day, compared against \
+the daily targets if they're set. log_meal's result includes "day_totals" and "targets", computed \
+from everything logged that day — quote those numbers rather than doing the addition yourself. Keep \
+it brief — a single line like "That's 450 kcal / 32g protein. You're at 1,200 kcal / 85g protein today (target: \
 1,800 kcal / 150g)" is the right amount of detail.
 
-You also have a persistent memory, separate from the visible conversation: "Notes" below (if any) \
+You also have a persistent memory, separate from the visible conversation: "Notes" in the data block (if any) \
 are things you've saved about this user's health journey that stay with them forever, not just for \
 this chat. Use save_note whenever the user shares something durable and important — an ongoing \
 strategy, a motivation, a constraint, context that shapes how you should advise them (e.g. "cutting \
@@ -77,7 +96,7 @@ each note a short, stable, descriptive key (lowercase, underscores, e.g. "alcoho
 topic already has a note, saving with the same key updates it in place rather than creating a \
 duplicate — do this when the user's situation or approach changes. Use delete_note if something is no \
 longer true or relevant. Treat existing notes as already known — don't ask the user to repeat \
-something you can see below.
+something you can see in them.
 
 Otherwise, use the logged data and notes to give specific, grounded guidance — reference actual \
 numbers, trends, and known context rather than generic advice. Be encouraging but honest; call out \
@@ -123,11 +142,14 @@ TOOLS = [
                         "nutrition yourself from the description before calling this. Use "
                         "meal_type 'alcohol' for any beer/wine/cocktail/liquor, regardless of "
                         "what time of day it was, rather than breakfast/lunch/dinner/snack. "
-                        "Before calling, check today's meals in the context — if an identical or "
-                        "very similar meal is already listed there, do not log it again.",
+                        "Before calling, check that day's meals in the data block — if an identical or "
+                        "very similar meal is already listed there, do not log it again. The result "
+                        "includes the day's updated totals.",
         "input_schema": {
             "type": "object",
             "properties": {
+                "date": {"type": "string", "description": "YYYY-MM-DD of the day it was eaten, "
+                         "defaults to today. Can't be in the future."},
                 "description": {"type": "string"},
                 "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack", "alcohol"]},
                 "calories": {"type": "number"},
@@ -227,6 +249,16 @@ def _fmt(value, suffix=""):
     return f"{value}{suffix}" if value is not None else "—"
 
 
+def _meal_line(m, label):
+    """One meal for the context: local time, type, what it was, and its numbers. Photo-only
+    meals have no description, so their AI-parsed food items stand in for it."""
+    when = to_local_time(m.logged_at).strftime("%-I:%M %p")
+    what = m.description or ", ".join(i.name for i in m.items) or "(no description)"
+    numbers = [_fmt(m.calories, " kcal"), _fmt(m.protein_g, "g protein")]
+    numbers += [f"{v}{unit}" for v, unit in ((m.carbs_g, "g carbs"), (m.fat_g, "g fat")) if v is not None]
+    return f"{when} [{label}] {what} — {', '.join(numbers)}"
+
+
 def _parse_date_or_today(raw):
     if raw:
         try:
@@ -250,6 +282,22 @@ def _latest_value(user_id, goal_type):
     row = (Measurement.query.filter_by(user_id=user_id, metric=goal_type)
            .order_by(Measurement.date.desc()).first())
     return float(row.value_in) if row else None
+
+
+def _day_totals(user_id, d):
+    """Confirmed totals for local day d plus the current targets — handed to the model so it
+    quotes server arithmetic instead of adding numbers up from the conversation."""
+    from .models import User
+
+    day = daily_rollup(user_id, d, d)[d]
+    period = User.query.get(user_id).current_period()
+    targets = None
+    if period and (period.daily_calorie_target or period.daily_protein_target_g):
+        targets = {"calories": period.daily_calorie_target,
+                   "protein_g": float(period.daily_protein_target_g) if period.daily_protein_target_g else None}
+    return {"day_totals": {"calories": day["calories"], "protein_g": round(day["protein"], 1),
+                           "drinks": day["drinks"]},
+            "targets": targets}
 
 
 def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
@@ -298,8 +346,12 @@ def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
             if calories is None or protein_g is None:
                 return {"error": "calories and protein_g are required"}
             meal_type = tool_input.get("meal_type")
+            d = _parse_date_or_today(tool_input.get("date"))
+            if d > local_today():
+                return {"error": f"{d} is in the future — meals can only be logged for today or earlier"}
             db.session.add(MealEntry(
                 user_id=user_id,
+                logged_at=logged_at_for(d),
                 description=tool_input.get("description"),
                 meal_type=meal_type,
                 drinks=(tool_input.get("drinks") or 1) if meal_type == "alcohol" else None,
@@ -310,7 +362,8 @@ def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
                 status="confirmed",
             ))
             db.session.commit()
-            return {"success": True, "calories": calories, "protein_g": protein_g}
+            return {"success": True, "date": str(d), "calories": calories, "protein_g": protein_g,
+                    **_day_totals(user_id, d)}
 
         if name == "log_exercise":
             activity = tool_input.get("activity")
@@ -400,6 +453,30 @@ def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
         return {"error": str(e)}
 
 
+def _today_line(user, today):
+    """Server-computed running totals for today, so the coach quotes them instead of adding
+    numbers up from the conversation."""
+    day = daily_rollup(user.id, today, today)[today]
+    label = f"Today so far ({today:%a %m/%d}): "
+    if not day["meals_logged"]:
+        return label + "nothing logged yet"
+    line = label + f"{day['calories']} kcal, {day['protein']:.0f}g protein, {day['drinks']:g} drink(s)"
+    period = user.current_period()
+    cal_target = period.daily_calorie_target if period else None
+    protein_target = float(period.daily_protein_target_g) if period and period.daily_protein_target_g else None
+    if cal_target and protein_target:
+        cal_left = cal_target - day["calories"]
+        protein_left = protein_target - day["protein"]
+        if cal_left >= 0 and protein_left > 0:
+            remaining = f"{cal_left} kcal and {protein_left:.0f}g protein left"
+        else:
+            cal_part = f"{cal_left} kcal left" if cal_left >= 0 else f"{-cal_left} kcal over"
+            protein_part = f"{protein_left:.0f}g protein left" if protein_left > 0 else "protein target met"
+            remaining = f"{cal_part} and {protein_part}"
+        line += f" — targets {cal_target} kcal / {protein_target:.0f}g protein, so {remaining}"
+    return line
+
+
 def build_context_summary(user) -> str:
     """Summarize the user's recent data for the system prompt."""
     from .models import BodyStat, CoachNote, ExerciseEntry, Goal, MealEntry, Measurement
@@ -419,6 +496,7 @@ def build_context_summary(user) -> str:
         f"{week_end} ({week_end.strftime('%A')}) — today is day "
         f"{(today - week_start).days + 1} of 7",
     ]
+    lines.append(_today_line(user, today))
     header_lines = len(lines)
 
     notes = CoachNote.query.filter_by(user_id=user.id).order_by(CoachNote.updated_at.desc()).all()
@@ -517,12 +595,16 @@ def build_context_summary(user) -> str:
                     label = (m.meal_type or "meal").capitalize()
                     if m.meal_type == "alcohol":
                         label += f", {m.drink_count:g} drink(s)"
-                    desc = m.description or "(no description)"
-                    lines.append(
-                        f"  [{label}] {desc} — {_fmt(m.calories, ' kcal')}, "
-                        f"{_fmt(m.protein_g, 'g protein')}, {_fmt(m.carbs_g, 'g carbs')}, "
-                        f"{_fmt(m.fat_g, 'g fat')}"
-                    )
+                    lines.append(f"  {_meal_line(m, label)}")
+
+    # Meals still awaiting confirmation in the app have no final numbers yet; listed so the
+    # coach knows they exist (and doesn't re-log them), but never counted.
+    pending = (MealEntry.query.filter_by(user_id=user.id, status="pending")
+               .order_by(MealEntry.logged_at.asc()).all())
+    if pending:
+        lines.append("\nAwaiting review in the app (NOT counted in any totals above):")
+        for m in pending:
+            lines.append(f"  {to_local_date(m.logged_at)} {_meal_line(m, (m.meal_type or 'meal').capitalize())}")
 
     recent_exercise = (
         ExerciseEntry.query.filter_by(user_id=user.id)
@@ -586,24 +668,55 @@ def build_context_summary(user) -> str:
     return "\n".join(lines)
 
 
+def load_history(user_id) -> list[dict]:
+    """The conversation history to send, oldest first, as {"role", "content", "created_at"}."""
+    from .models import ChatMessage
+
+    rows = (ChatMessage.query.filter_by(user_id=user_id)
+            .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+            .limit(HISTORY_MAX).all())
+    since = local_today() - timedelta(days=1)
+    keep = [m for i, m in enumerate(rows) if i < HISTORY_MIN or to_local_date(m.created_at) >= since]
+    keep.reverse()
+    while keep and keep[0].role != "user":  # the API requires the first message be the user's
+        keep.pop(0)
+    return [{"role": m.role, "content": m.content, "created_at": m.created_at} for m in keep]
+
+
+def _stamp(local_dt) -> str:
+    return local_dt.strftime("[%a %b %-d, %-I:%M %p]")
+
+
 def get_response(api_key: str, user, conversation_history: list[dict], new_message: str) -> str:
     """
-    conversation_history: list of {"role": "user"|"assistant", "content": str}, oldest first.
+    conversation_history: load_history() output, oldest first. Each message goes out stamped
+    with when it was sent, so the model can tell yesterday's "you're at 1,800 today" from today.
     Runs a tool-use loop so the coach can actually log data, not just talk about it.
     Returns the assistant's final reply text.
+
+    Request layout, for prompt caching (a cache is a prefix match: tools -> system -> messages):
+    the system prompt is fully static, and everything that changes per turn — the data block,
+    the clock — rides in the newest user message, after the last cache breakpoint.
     """
     client = anthropic.Anthropic(api_key=api_key)
 
-    context = build_context_summary(user)
-    system = f"{SYSTEM_PROMPT}\n\n--- User's current data ---\n{context}"
-
-    messages = list(conversation_history) + [{"role": "user", "content": new_message}]
+    messages = [
+        {"role": m["role"],
+         "content": [{"type": "text", "text": f"{_stamp(to_local_time(m['created_at']))} {m['content']}"}]}
+        for m in conversation_history
+    ]
+    if messages:
+        messages[-1]["content"][-1]["cache_control"] = CACHE
+    messages.append({"role": "user", "content": [
+        {"type": "text", "text": f"<current_data>\n{build_context_summary(user)}\n</current_data>"},
+        {"type": "text", "text": f"{_stamp(local_now())} {new_message}"},
+    ]})
 
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.messages.create(
             model=CHAT_MODEL,
             max_tokens=1024,
-            system=system,
+            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": CACHE}],
             tools=TOOLS,
             messages=messages,
         )

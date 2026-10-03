@@ -8,7 +8,7 @@ from flask import (Blueprint, current_app, flash, jsonify, redirect, render_temp
 from ..extensions import db
 from ..meal_ai import parse_meal
 from ..models import FoodItem, MealEntry, SavedMeal
-from ..timeutils import local_date_to_utc_noon, local_today, to_local_date
+from ..timeutils import local_today, logged_at_for, to_local_date
 
 meals_bp = Blueprint("meals", __name__, url_prefix="/meals")
 
@@ -56,9 +56,7 @@ def _parse_logged_date(date_str):
         d = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
         return None
-    if d == local_today():
-        return datetime.utcnow()
-    return local_date_to_utc_noon(d)
+    return logged_at_for(d)
 
 
 @meals_bp.route("/")

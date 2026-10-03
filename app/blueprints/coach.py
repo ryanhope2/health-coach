@@ -1,12 +1,10 @@
 from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 
-from ..ai_coach import get_response
+from ..ai_coach import get_response, load_history
 from ..extensions import db
 from ..models import ChatMessage, CoachNote, User, normalize_note_key
 
 coach_bp = Blueprint("coach", __name__, url_prefix="/coach")
-
-HISTORY_TURNS = 20  # messages (not pairs) sent to Claude as context
 
 
 def _current_user_id():
@@ -36,14 +34,7 @@ def send():
 
     user = User.query.get(user_id)
 
-    history_rows = (
-        ChatMessage.query.filter_by(user_id=user_id)
-        .order_by(ChatMessage.created_at.desc())
-        .limit(HISTORY_TURNS)
-        .all()
-    )
-    history_rows.reverse()
-    history = [{"role": m.role, "content": m.content} for m in history_rows]
+    history = load_history(user_id)  # before saving the new message, which goes separately
 
     db.session.add(ChatMessage(user_id=user_id, role="user", content=text))
     db.session.commit()

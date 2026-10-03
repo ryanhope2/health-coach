@@ -584,15 +584,40 @@ Each turn, `ai_coach.build_context_summary()` pulls:
 - **current date/time**, always first, in `USER_TIMEZONE` (`America/New_York`, defined in
   `app/timeutils.py` — see Timezone Handling above — hardcoded rather than a stored
   setting, since travel is the stated exception rather than the common case)
+- **"Today so far"** — server-computed calories/protein/drinks for today vs. the period's
+  targets and what's left (`_today_line()`, from `progress.daily_rollup()`)
 - last 60 days of weight/body fat
 - last 90 days of measurements
-- last 14 days of meals (confirmed only), rolled up to daily calorie/protein totals
+- last 14 *local* days of meals (confirmed only), rolled up to daily totals, plus the last 3
+  days line by line with local time of day; photo-only meals show their parsed `FoodItem`
+  names (they have no description)
+- meals still `pending` in the app, listed as "NOT counted in any totals"
 - last 14 days of exercise
 - all active goals
 
-...into a text block passed as part of the Claude system prompt, along with the
-persisted conversation history (`ChatMessage` rows) and the new message. This grounds
-the coach's advice in actual numbers rather than generic guidance.
+**Where it goes, and why (redesigned 2026-10-03 after the coach kept mis-adding totals,
+missing app-logged meals, and blending yesterday's meals into today):**
+- The data block rides in the **newest user message** inside `<current_data>`, not in the
+  system prompt. The system prompt (`SYSTEM_PROMPT`) is fully static, and the system prompt
+  plus the last history message carry `cache_control` breakpoints, so tools + system +
+  history cache across turns. Anything per-turn (the clock, the data) must stay after the
+  last breakpoint, or caching silently stops — `test_system_prompt_is_static` guards this.
+  It also puts the facts right next to the question being asked.
+- The system prompt tells the coach the data block is the **source of truth** over the
+  conversation (it includes meals logged directly in the app and excludes ones since
+  edited or deleted), and never to add up totals from chat.
+- **History is time-windowed and stamped** (`load_history()`): all of today's and yesterday's
+  messages, at least `HISTORY_MIN` (20), at most `HISTORY_MAX` (80), never starting with an
+  assistant turn. Every message goes out prefixed with its local send time, e.g.
+  `[Fri Oct 2, 8:10 PM]` (stored `ChatMessage.content` is never stamped). Before this, history
+  was the last 20 messages with no dates at all, so yesterday's "you're at 1,800 kcal today"
+  read as current.
+- **`log_meal` returns server-computed `day_totals` + `targets`** for that day, and the
+  prompt says to quote them rather than do the addition. It also takes an optional `date`
+  (backdating via `timeutils.logged_at_for()`, same as the meals page; future dates are
+  rejected) — before, "yesterday I had…" was logged as today.
+- Tool calls are deliberately **not** saved into history: the user deletes wrong coach
+  entries, so a record of what the coach once logged would contradict what's stored.
 
 **Why current time is explicit context, not assumed:** the server runs in UTC with no
 notion of the user's local day boundary, and before this the coach had no time signal at
@@ -654,8 +679,8 @@ environment, so the button-disable in the old (pre-fetch) version had to defer v
 `setTimeout(fn, 0)`. With the fetch-based flow this is moot since `preventDefault()` is
 called unconditionally and the network request is issued manually.
 
-**Persistent memory (`CoachNote`):** the last-20-messages window means anything older
-than ~10 exchanges drops out of what the coach can see conversationally — fine for chat
+**Persistent memory (`CoachNote`):** the history window (see above) means anything older
+than yesterday (beyond the 20-message minimum) drops out of what the coach can see conversationally — fine for chat
 flow, not fine for durable facts ("this is a big part of my health journey and I have a
 strategy for it"). `CoachNote` rows (`app/models.py`) solve this the same way `BodyStat`
 etc. do: `build_context_summary()` pulls *all* of a user's notes fresh from the DB every

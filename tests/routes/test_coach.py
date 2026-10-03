@@ -30,11 +30,12 @@ def test_history_excludes_the_new_message_and_other_users(client, user, other_us
     make_chat(other_user, "user", "their message")
     claude.replies_text("ok")
     client.post("/coach/send", data={"message": "new"}, headers=AJAX)
-    assert claude.calls[0]["messages"] == [
-        {"role": "user", "content": "older question"},
-        {"role": "assistant", "content": "older answer"},
-        {"role": "user", "content": "new"},
-    ]
+    sent = claude.calls[0]["messages"]
+    assert [m["role"] for m in sent] == ["user", "assistant", "user"]
+    assert sent[0]["content"][0]["text"].endswith("older question")
+    assert sent[1]["content"][0]["text"].endswith("older answer")
+    assert sent[2]["content"][-1]["text"].endswith("new")
+    assert "their message" not in str(sent)
 
 
 def test_ai_failure_still_stores_a_reply(client, claude):

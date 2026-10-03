@@ -1,8 +1,14 @@
-"""get_response: the tool-use loop between the model and _execute_tool."""
+"""get_response: request shape (static system prompt, data block in the latest message,
+cache breakpoints) and the tool-use loop."""
 import json
 
-from app.ai_coach import MAX_TOOL_ROUNDS, get_response
+from app.ai_coach import MAX_TOOL_ROUNDS, SYSTEM_PROMPT, get_response
 from app.models import MealEntry
+from tests.builders import day, local_dt, log_meal, make_chat
+
+
+def text_of(message):
+    return "\n".join(b["text"] for b in message["content"] if b.get("type") == "text")
 
 
 def test_plain_reply(user, claude):
@@ -10,15 +16,42 @@ def test_plain_reply(user, claude):
     assert get_response("key", user, [], "how am I doing?") == "Looking good."
 
 
-def test_context_and_history_are_sent(user, claude, clock):
+def test_system_prompt_is_static(user, other_user, claude, clock):
+    # Nothing per-user or per-moment in the system prompt, so it (and the tools) cache.
     clock.at("2026-09-30 09:00")
     claude.replies_text("ok")
-    history = [{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "reply"}]
-    get_response("key", user, history, "now")
-    call = claude.calls[0]
-    assert "Current week (Sun-Sat): 2026-09-27" in call["system"]
-    assert call["messages"] == history + [{"role": "user", "content": "now"}]
-    assert {t["name"] for t in call["tools"]} >= {"log_meal", "log_exercise", "save_note"}
+    get_response("key", user, [], "a")
+    clock.at("2026-10-01 18:00")
+    log_meal(other_user, day(4))
+    claude.replies_text("ok")
+    get_response("key", other_user, [], "b")
+    first, second = (c["system"] for c in claude.calls)
+    assert first == second
+    assert first[0]["text"] == SYSTEM_PROMPT
+    assert first[0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_data_block_rides_in_the_latest_message(user, claude, clock):
+    clock.at("2026-09-30 09:00")
+    claude.replies_text("ok")
+    get_response("key", user, [], "now")
+    last = claude.calls[0]["messages"][-1]
+    assert last["role"] == "user"
+    assert "Current week (Sun-Sat): 2026-09-27" in text_of(last)
+    assert text_of(last).rstrip().endswith("now")
+
+
+def test_history_ends_with_a_cache_breakpoint(user, claude, clock):
+    clock.at("2026-09-30 09:00")
+    make_chat(user, "user", "q", at=local_dt(day(3), "08:00"))
+    make_chat(user, "assistant", "a", at=local_dt(day(3), "08:01"))
+    claude.replies_text("ok")
+    from app.ai_coach import load_history
+    get_response("key", user, load_history(user.id), "now")
+    sent = claude.calls[0]["messages"]
+    assert sent[1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in sent[0]["content"][-1]
+    assert all("cache_control" not in b for b in sent[-1]["content"])
 
 
 def test_tool_call_is_executed_and_its_result_sent_back(user, claude):
