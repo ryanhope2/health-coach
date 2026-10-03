@@ -29,13 +29,13 @@
       </div>
       <div class="col-6 col-md-4" id="activityField">
         <label class="form-label small">Activity</label>
-        <input type="text" name="activity" class="form-control" placeholder="e.g. Peloton, Curls" required>
+        <input type="text" name="activity" class="form-control" value="Peloton" placeholder="e.g. Peloton, Curls" required>
       </div>
 
       {# Cardio fields #}
       <div class="col-6 col-md-2 exercise-fields cardio-fields">
         <label class="form-label small">Duration (min)</label>
-        <input type="number" name="duration_min" class="form-control" min="1">
+        <input type="number" name="duration_min" class="form-control" min="1" value="20">
       </div>
       <div class="col-6 col-md-2 exercise-fields cardio-fields">
         <label class="form-label small">Calories burned</label>
@@ -233,6 +233,9 @@
     logForm.querySelectorAll('.' + (type === 'sets' ? 'sets' : type === 'hang' ? 'hang' : 'cardio') + '-fields')
            .forEach(el => el.classList.remove('d-none'));
     const activity = logForm.querySelector('[name="activity"]');
+    // Peloton is only the cardio default — don't leave it behind on Sets/Hang.
+    if (type === 'cardio' && !activity.value) activity.value = 'Peloton';
+    else if (type !== 'cardio' && activity.value === 'Peloton') activity.value = '';
     activity.placeholder = type === 'hang' ? 'e.g. Bar hang'
                          : type === 'sets' ? 'e.g. Curls, Pushups, Sit-ups'
                          : 'e.g. Peloton, Run, Yoga';

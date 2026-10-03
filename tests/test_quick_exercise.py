@@ -33,3 +33,16 @@ class QuickExerciseTest(AppTestCase):
         r = self.client.post("/exercise/new", data={
             "activity": "Run", "next": "https://evil.example/"})
         self.assertEqual(r.headers["Location"], "/exercise/")
+
+
+class CardioDefaultsTest(AppTestCase):
+    def _assert_defaults(self, path):
+        html = self.client.get(path).get_data(as_text=True)
+        self.assertRegex(html, r'name="activity"[^>]*value="Peloton"')
+        self.assertRegex(html, r'name="duration_min"[^>]*value="20"')
+
+    def test_dashboard_modal_defaults_to_peloton_20_min(self):
+        self._assert_defaults("/")
+
+    def test_exercise_page_defaults_to_peloton_20_min(self):
+        self._assert_defaults("/exercise/")

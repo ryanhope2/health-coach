@@ -257,7 +257,9 @@ Tapping the dots opens `quickExerciseModal` — the same cardio/sets/hang form a
 `exercise.new` with `next=/`. `exercise.new` redirects via an allowlisted `_safe_next()`
 (dashboard or `/exercise/`), mirroring `body.py`/`meals.py`. Sets and hang each have their
 own `sets` input, so the modal JS disables the hidden type's inputs — otherwise both would
-submit under the same name.
+submit under the same name. Cardio defaults to activity "Peloton" / 20 min on both this
+modal and `/exercise/`; the JS clears the default activity when switching to Sets/Hang and
+restores it on Cardio (a custom activity is left alone).
 
 **Coach widget (`app/templates/coach/_widget.html`):** the dashboard embeds the *same*
 functional chat as the full `/coach/` page — recent messages plus a live send/receive

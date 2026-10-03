@@ -100,12 +100,12 @@
             </div>
             <div class="col-6">
               <label class="form-label small">Activity</label>
-              <input type="text" name="activity" class="form-control" placeholder="e.g. Peloton, Run, Yoga" required autocomplete="off">
+              <input type="text" name="activity" class="form-control" value="Peloton" placeholder="e.g. Peloton, Run, Yoga" required autocomplete="off">
             </div>
 
             <div class="col-6 qx-fields qx-cardio-fields">
               <label class="form-label small">Duration (min)</label>
-              <input type="number" name="duration_min" class="form-control" min="1">
+              <input type="number" name="duration_min" class="form-control" min="1" value="20">
             </div>
             <div class="col-6 qx-fields qx-cardio-fields">
               <label class="form-label small">Calories burned</label>
@@ -245,7 +245,13 @@
 
     // Sets and hang each have their own "sets" input; only the visible one may be
     // enabled, or both would submit and the later (hidden) one would win.
+    var activity = form.querySelector('[name="activity"]');
+    var DEFAULT_ACTIVITY = 'Peloton';
+
     function showType(type) {
+      // Peloton is only the cardio default — don't leave it behind on Sets/Hang.
+      if (type === 'cardio' && !activity.value) activity.value = DEFAULT_ACTIVITY;
+      else if (type !== 'cardio' && activity.value === DEFAULT_ACTIVITY) activity.value = '';
       form.querySelectorAll('.qx-fields').forEach(function (el) {
         var show = el.classList.contains('qx-' + type + '-fields');
         el.classList.toggle('d-none', !show);
