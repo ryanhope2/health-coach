@@ -246,9 +246,11 @@ not a new set of interactions.
 **Exercise dots:** seven dots, fixed **Sunday-through-Saturday calendar week** (not a
 rolling trailing-7-days window) — `days_since_sunday = (today.weekday() + 1) % 7` (Python's
 `weekday()` returns Monday=0..Sunday=6), then `week_start = today - timedelta(days=days_since_sunday)`.
-Colored as a group by that week's total exercise-day count, not per-dot: red at 1 day,
-yellow at 2-3, green at 4+, matching the user's own stated exercise goal cadence — the
-color alone is meant to answer "am I on track this week," no separate count/label needed.
+Colored as a group, not per-dot, by how much slack is left to reach the weekly target
+(period's `weekly_exercise_days_target`, default 4): days that can still count (rest of the
+week, plus today if not yet exercised) minus sessions still needed. 2+ spare days green,
+1 spare yellow, 0 spare red; target already met is green. A single workout on Sunday is
+green, not red — the color answers "am I on track," not "how many so far."
 
 **Coach widget (`app/templates/coach/_widget.html`):** the dashboard embeds the *same*
 functional chat as the full `/coach/` page — recent messages plus a live send/receive

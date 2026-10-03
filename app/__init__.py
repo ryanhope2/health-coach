@@ -172,14 +172,17 @@ def create_app(config=None):
         exercise_days = [{"date": d, "done": d in exercised_dates} for d in week_dates]
         exercise_count = sum(1 for d in exercise_days if d["done"])
         exercise_target = (period.weekly_exercise_days_target if period else None) or 4
-        if exercise_count >= exercise_target:
+        # Color = how much slack is left to still reach the target this week:
+        # days that can still count (rest of the week, plus today if not yet
+        # exercised) minus sessions still needed. 2+ spare days green, 1 yellow,
+        # none red; target already met is green.
+        needed = exercise_target - exercise_count
+        if needed <= 0:
             exercise_color = "green"
-        elif exercise_count >= 2:
-            exercise_color = "yellow"
-        elif exercise_count >= 1:
-            exercise_color = "red"
         else:
-            exercise_color = None
+            days_left = 6 - days_since_sunday + (0 if today in exercised_dates else 1)
+            slack = days_left - needed
+            exercise_color = "green" if slack >= 2 else "yellow" if slack == 1 else "red"
 
         recent_chat = (
             ChatMessage.query.filter_by(user_id=user.id)
