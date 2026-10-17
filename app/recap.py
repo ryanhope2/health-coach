@@ -6,6 +6,8 @@ eaten, the workouts, and that week's coach chat.
 """
 from datetime import datetime, timedelta
 
+import json
+
 import anthropic
 
 from . import progress
@@ -18,11 +20,12 @@ PRIOR_WEEKS = 3
 MAX_RECAP_WORDS = 140  # prompt asks for 130; one tightening pass if the model overshoots
 MAX_CHAT_MESSAGES = 60
 MAX_CHAT_CHARS = 400
+RECAP_EFFORT = "low"  # writing from numbers it's handed; thinking counts toward max_tokens
 
 RECAP_PROMPT = """You write the weekly recap on a personal fitness tracker's Progress page. The \
 person reads it to see how their week actually went against their goals.
 
-Call the save_recap tool with two fields:
+Reply with two fields:
 - "headline": at most 35 words, 1-2 sentences. The week's verdict in the fewest words: the \
 biggest win, the biggest miss, where they stand on goal pace, then "Focus:" and the one thing to \
 do next. Fragments are fine.
@@ -41,17 +44,14 @@ points, no generic praise.{in_progress}
 
 {data}"""
 
-RECAP_TOOL = {
-    "name": "save_recap",
-    "description": "Save the weekly recap shown on the Progress page.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "headline": {"type": "string", "description": "At most 35 words, 1-2 sentences, ending with 'Focus: ...'"},
-            "recap": {"type": "string", "description": "At most 5 sentences and 130 words of plain prose, ending with 'Focus: ...'"},
-        },
-        "required": ["headline", "recap"],
+RECAP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "headline": {"type": "string", "description": "At most 35 words, 1-2 sentences, ending with 'Focus: ...'"},
+        "recap": {"type": "string", "description": "At most 5 sentences and 130 words of plain prose, ending with 'Focus: ...'"},
     },
+    "required": ["headline", "recap"],
+    "additionalProperties": False,
 }
 
 IN_PROGRESS_NOTE = """
@@ -171,13 +171,14 @@ def generate_recap(api_key, user, period, wk_start, as_of=None):
     )
 
     client = anthropic.Anthropic(api_key=api_key)
-    # A forced tool call rather than "return JSON" in the prompt: asked for plain JSON, the
-    # model once wrapped it in a code fence with a trailing comma, and the raw reply ended
-    # up on the page. A tool schema makes the structure the API's job.
+    # Structured output rather than "return JSON" in the prompt: asked for plain JSON, the
+    # model once wrapped it in a code fence with a trailing comma, and the raw reply ended up
+    # on the page. (This used to be a forced tool call; current models reject forced
+    # tool_choice.) The schema makes the structure the API's job.
     messages = [{"role": "user", "content": prompt}]
     call = lambda: client.messages.create(  # noqa: E731
-        model=CHAT_MODEL, max_tokens=1000, messages=messages,
-        tools=[RECAP_TOOL], tool_choice={"type": "tool", "name": RECAP_TOOL["name"]},
+        model=CHAT_MODEL, max_tokens=8000, messages=messages,
+        output_config={"effort": RECAP_EFFORT, "format": {"type": "json_schema", "schema": RECAP_SCHEMA}},
     )
     response = call()
     headline, content = _parse_recap(response)
@@ -186,16 +187,12 @@ def generate_recap(api_key, user, period, wk_start, as_of=None):
     # when asked for 130 — but it's good at compressing its own draft when shown the count.
     words = len(content.split())
     if words > MAX_RECAP_WORDS:
-        tool_use = next(b for b in response.content if b.type == "tool_use")
         messages += [
             {"role": "assistant", "content": response.content},
-            {"role": "user", "content": [{
-                "type": "tool_result", "tool_use_id": tool_use.id, "is_error": True,
-                "content": f"The recap is {words} words; the limit is 130. Call save_recap again with "
-                           "the recap rewritten to 130 words or fewer: keep every number and the "
-                           "specific days/meals, cut phrasing and the least important detail. Keep "
-                           "the headline as is unless it's over 35 words.",
-            }]},
+            {"role": "user", "content": f"The recap is {words} words; the limit is 130. Rewrite it to "
+                                        "130 words or fewer: keep every number and the specific "
+                                        "days/meals, cut phrasing and the least important detail. Keep "
+                                        "the headline as is unless it's over 35 words."},
         ]
         headline, content = _parse_recap(call())
 
@@ -212,14 +209,19 @@ def generate_recap(api_key, user, period, wk_start, as_of=None):
 
 
 def _parse_recap(response):
-    """(headline, full recap) from the save_recap tool call."""
-    for block in response.content:
-        if block.type == "tool_use" and block.name == RECAP_TOOL["name"]:
-            headline = (block.input.get("headline") or "").strip()
-            recap = (block.input.get("recap") or "").strip()
-            if recap:
-                return headline or None, recap
-    raise ValueError("The model didn't return a recap.")
+    """(headline, full recap) from the structured-output reply."""
+    if response.stop_reason == "refusal":
+        raise ValueError("The model declined to write this recap.")
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        raise ValueError("The model didn't return a recap.")
+    headline = (data.get("headline") or "").strip()
+    recap = (data.get("recap") or "").strip()
+    if not recap:
+        raise ValueError("The model didn't return a recap.")
+    return headline or None, recap
 
 
 def latest_recap(user_id):

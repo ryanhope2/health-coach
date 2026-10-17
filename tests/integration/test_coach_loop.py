@@ -2,7 +2,7 @@
 cache breakpoints) and the tool-use loop."""
 import json
 
-from app.ai_coach import MAX_TOOL_ROUNDS, SYSTEM_PROMPT, get_response
+from app.ai_coach import CHAT_EFFORT, CHAT_MODEL, MAX_TOOL_ROUNDS, SYSTEM_PROMPT, get_response
 from app.models import MealEntry
 from tests.builders import day, local_dt, log_meal, make_chat
 
@@ -77,3 +77,31 @@ def test_gives_up_after_max_tool_rounds(user, claude):
     reply = get_response("key", user, [], "loop forever")
     assert "check your logs" in reply
     assert len(claude.calls) == MAX_TOOL_ROUNDS
+
+
+# --- Sonnet 5.5: thinking, effort, refusals -------------------------------------------------
+
+def test_request_settings(user, claude):
+    claude.replies_text("ok")
+    get_response("key", user, [], "hi")
+    call = claude.calls[0]
+    assert call["model"] == CHAT_MODEL == "claude-sonnet-5-5"
+    assert call["output_config"] == {"effort": CHAT_EFFORT}
+    assert CHAT_EFFORT == "medium"
+    assert call["max_tokens"] >= 8000  # thinking counts toward it
+    assert "tool_choice" not in call
+
+
+def test_thinking_blocks_are_passed_back_unchanged_within_a_turn(user, claude):
+    claude.calls_tool("save_note", {"key": "k", "content": "c"})
+    claude.replies_text("Saved.")
+    get_response("key", user, [], "remember this")
+    first_response_blocks = claude.calls[1]["messages"][-2]["content"]
+    assert first_response_blocks[0].type == "thinking"
+    assert [b.type for b in first_response_blocks] == ["thinking", "tool_use"]
+
+
+def test_a_refusal_becomes_a_friendly_reply(user, claude):
+    claude.refuses()
+    reply = get_response("key", user, [], "something")
+    assert reply and "couldn't help with that" in reply

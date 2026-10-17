@@ -339,16 +339,18 @@ use identical code). Sections, top to bottom:
   page) plus CoachNotes, meal descriptions, workouts, and that week's chat, so it can say
   *why* a week looked the way it did (e.g. the `travel` note explaining a Disney week).
   The latest recap is also injected into the AI coach's context.
-  **Two lengths from one call:** the model returns (via a tool call) a ≤35-word `headline` (shown by
+  **Two lengths from one call:** the model returns (as structured output) a ≤35-word `headline` (shown by
   default) and a ≤130-word `recap` (`content`, behind "Read full recap"). The first version
   was a single ~280-word paragraph that pushed the weight chart below the fold; the user
   liked every insight in it, so the fix was compression (every sentence must carry a number
   or specific fact, no filler) plus a short/long split — not dropping content or moving the
-  recap to the bottom of the page. Output comes through a **forced `save_recap` tool call**, not "return JSON" in the prompt —
-  asked for plain JSON, the model once wrapped it in a code fence with a trailing comma and
-  the raw text landed on the page. **Word limits in the prompt don't hold on their own**
+  recap to the bottom of the page. Output comes through **structured output** (`output_config.format` with a JSON schema,
+  `RECAP_SCHEMA`), not "return JSON" in the prompt — asked for plain JSON, the model once
+  wrapped it in a code fence with a trailing comma and the raw text landed on the page. (It was
+  a forced `save_recap` tool call before the Sonnet 5.5 upgrade, which doesn't accept a forced
+  `tool_choice`.) **Word limits in the prompt don't hold on their own**
   (it reliably wrote 170-200 words when asked for 130), so if the recap exceeds
-  `MAX_RECAP_WORDS` the code replies with a tool error stating the count and asks for a
+  `MAX_RECAP_WORDS` the code replies with a follow-up message stating the count and asks for a
   rewrite — compressing its own draft is something the model does well. The prompt also forbids
   counting from the raw meal/workout lists (only the given summary numbers) — the first
   recap re-counted workouts itself and called a Disney walking day a Peloton ride — and the
@@ -413,7 +415,8 @@ advise on meds.
 
 1. User submits a photo and/or free-text description at `/meals/new`
 2. `meal_ai.parse_meal()` sends both to **Claude Sonnet** (vision + text in one call),
-   asking for structured JSON: line items + total calories/protein/carbs/fat
+   with structured output (`PARSE_SCHEMA`) so the API guarantees JSON: line items + total
+   calories/protein/carbs/fat, drinks, confidence — no code-fence/missing-field cleanup
 3. Result lands on `/meals/<id>/review` — an editable form pre-filled with the AI
    estimate; user adjusts anything that looks wrong and confirms, including `meal_type`
    itself (the AI's/time-based guess isn't always right, e.g. a late lunch that gets
@@ -685,6 +688,17 @@ formula the dashboard route already uses (see Dashboard Layout above) — and ad
 now tells the coach to use those given dates directly rather than deriving them itself.
 Confirmed fixed live: the same question on the same Sunday now correctly answers with
 that Sunday-through-Saturday window and counts only today's entry so far.
+
+**Models and thinking (Sonnet 5.5 upgrade):** all three AI calls use `claude-sonnet-5-5`, which
+thinks by default. Effort is set per call via `output_config.effort`: coach **medium**
+(`CHAT_EFFORT` — its recurring failures are date/total reasoning), meal parse and recap **low**.
+Thinking counts toward `max_tokens`, so those were raised (coach 16000, parse/recap 8000).
+Consequences to preserve: responses usually lead with a thinking block, so always read
+content **by block type, never by position** (`content[0].text` breaks); thinking blocks are
+passed back unchanged inside the tool loop (the API checks them); and every call handles
+`stop_reason == "refusal"` — the coach replies with a friendly line, parse/recap raise so the
+existing error paths take over. The fake client in `tests/fakes.py` mirrors this (thinking
+block first; `replies_json()`, `refuses()`).
 
 **Tool use:** `get_response()` runs a tool-use loop (`TOOLS` in `app/ai_coach.py`) with
 ten tools — `log_body_stat`, `log_measurement`, `log_meal`, `log_exercise`,

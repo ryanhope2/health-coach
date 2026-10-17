@@ -1,15 +1,12 @@
-"""meal_ai's handling of the model's reply (the API call itself is faked)."""
+"""meal_ai: the request it makes and how it reads the reply (the API itself is faked)."""
 import pytest
 
-from app.meal_ai import _extract_json, parse_meal
+from app.meal_ai import PARSE_EFFORT, PARSE_MODEL, parse_meal
 
-
-def test_extracts_plain_json():
-    assert _extract_json('{"a": 1}') == {"a": 1}
-
-
-def test_extracts_json_wrapped_in_a_code_fence():
-    assert _extract_json('```json\n{"a": 1}\n```') == {"a": 1}
+PARSED = {"items": [{"name": "eggs", "quantity": "2", "calories": 140, "protein_g": 12,
+                     "carbs_g": 1, "fat_g": 10}],
+          "total_calories": 450, "total_protein_g": 20, "total_carbs_g": 40, "total_fat_g": 12,
+          "drinks": 0, "confidence": 0.8}
 
 
 def test_requires_a_photo_or_description():
@@ -17,28 +14,39 @@ def test_requires_a_photo_or_description():
         parse_meal("key")
 
 
-def test_totals_are_coerced_to_float_and_bad_values_become_none(claude):
-    claude.replies_text('{"items": [], "total_calories": "450", "total_protein_g": "lots", '
-                        '"total_carbs_g": 40, "total_fat_g": null, "drinks": 0}')
-    result = parse_meal("key", text_description="a sandwich")
+def test_request_uses_structured_output_and_explicit_effort(claude):
+    claude.replies_json(PARSED)
+    parse_meal("key", text_description="eggs")
+    call = claude.calls[0]
+    assert call["model"] == PARSE_MODEL == "claude-sonnet-5-5"
+    assert call["output_config"]["effort"] == PARSE_EFFORT == "low"
+    schema = call["output_config"]["format"]["schema"]
+    assert call["output_config"]["format"]["type"] == "json_schema"
+    assert set(schema["required"]) >= {"items", "total_calories", "total_protein_g", "drinks"}
+    assert schema["additionalProperties"] is False
+    assert "tool_choice" not in call
+    assert call["max_tokens"] >= 4000  # thinking counts toward it
+
+
+def test_reads_the_json_after_a_leading_thinking_block(claude):
+    claude.replies_json(PARSED)  # the fake leads with a thinking block, as the API does
+    result = parse_meal("key", text_description="eggs")
     assert result["total_calories"] == 450.0
-    assert result["total_protein_g"] is None
-    assert result["total_carbs_g"] == 40.0
-    assert result["confidence"] == 0.5
+    assert result["items"][0]["name"] == "eggs"
 
 
-def test_missing_items_becomes_an_empty_list(claude):
-    claude.replies_text('{"total_calories": 100}')
-    assert parse_meal("key", text_description="x")["items"] == []
+def test_totals_are_floats(claude):
+    claude.replies_json(PARSED | {"total_protein_g": 20})
+    assert parse_meal("key", text_description="x")["total_protein_g"] == 20.0
 
 
-def test_unparseable_reply_raises_value_error(claude):
-    claude.replies_text("Sorry, I can't tell what that is.")
-    with pytest.raises(ValueError):
+def test_a_refusal_raises_value_error(claude):
+    claude.refuses()
+    with pytest.raises(ValueError, match="declined"):
         parse_meal("key", text_description="x")
 
 
 def test_description_is_sent_to_the_model(claude):
-    claude.replies_text('{"items": []}')
+    claude.replies_json(PARSED)
     parse_meal("key", text_description="two eggs and toast")
     assert "two eggs and toast" in claude.prompt_text()

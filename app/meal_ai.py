@@ -9,14 +9,35 @@ edits before confirming, same as vibe-split's receipt review flow.
 import base64
 import json
 import logging
-import re
 from pathlib import Path
 
 import anthropic
 
 logger = logging.getLogger(__name__)
 
-PARSE_MODEL = "claude-sonnet-4-5"
+PARSE_MODEL = "claude-sonnet-5-5"
+PARSE_EFFORT = "low"  # extraction; thinking counts toward max_tokens, so leave room for it
+
+_NUMBER = {"type": "number"}
+# Structured output: the API guarantees the reply is JSON matching this schema, so there's
+# no code-fence/trailing-comma cleanup to do (the old prompt-only "return JSON" approach).
+PARSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "quantity": {"type": "string"},
+                           "calories": _NUMBER, "protein_g": _NUMBER, "carbs_g": _NUMBER, "fat_g": _NUMBER},
+            "required": ["name", "quantity", "calories", "protein_g", "carbs_g", "fat_g"],
+            "additionalProperties": False,
+        }},
+        "total_calories": _NUMBER, "total_protein_g": _NUMBER, "total_carbs_g": _NUMBER,
+        "total_fat_g": _NUMBER, "drinks": _NUMBER, "confidence": _NUMBER,
+    },
+    "required": ["items", "total_calories", "total_protein_g", "total_carbs_g", "total_fat_g",
+                 "drinks", "confidence"],
+    "additionalProperties": False,
+}
 
 SYSTEM_PROMPT = """You are a nutrition estimation assistant inside a personal fitness tracker. \
 Given a photo of a meal and/or a text description of what was eaten, identify the individual \
@@ -24,26 +45,14 @@ food items and estimate their nutrition. Be a reasonable, practical estimator â€
 portion sizes and standard nutrition data when exact amounts aren't given. It's fine to be \
 approximate; the user can correct anything before saving."""
 
-PARSE_PROMPT = """Estimate the nutrition for this meal. Return ONLY valid JSON with this exact structure:
-
-{
-  "items": [
-    {"name": "string", "quantity": "string, e.g. '1 cup' or '2 slices'", "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number}
-  ],
-  "total_calories": number,
-  "total_protein_g": number,
-  "total_carbs_g": number,
-  "total_fat_g": number,
-  "drinks": number,
-  "confidence": 0.0-1.0
-}
+PARSE_PROMPT = """Estimate the nutrition for this meal.
 
 Rules:
 - Break the meal into distinct items rather than one lump entry, when there's more than one component
+- quantity is a portion like "1 cup" or "2 slices"
 - All numeric fields are estimates in normal units (calories in kcal, macros in grams)
 - drinks is how many alcoholic drinks this is, as a person would count them (2 glasses of wine = 2, half a glass = 0.5, one cocktail = 1); 0 if there's no alcohol
-- confidence reflects how certain you are given what was provided (a clear photo + description is high confidence; a vague description is lower)
-- Return ONLY the JSON object, no other text
+- confidence (0.0-1.0) reflects how certain you are given what was provided (a clear photo + description is high confidence; a vague description is lower)
 
 Meal:
 """
@@ -62,14 +71,6 @@ def _load_image_b64(image_path: str) -> tuple[str, str]:
     with open(image_path, "rb") as f:
         data = base64.standard_b64encode(f.read()).decode("utf-8")
     return data, media_type
-
-
-def _extract_json(text: str) -> dict:
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-z]*\n?", "", text)
-        text = re.sub(r"\n?```$", "", text.strip())
-    return json.loads(text.strip())
 
 
 def parse_meal(api_key: str, photo_path: str | None = None, text_description: str | None = None) -> dict:
@@ -96,27 +97,26 @@ def parse_meal(api_key: str, photo_path: str | None = None, text_description: st
 
     message = client.messages.create(
         model=PARSE_MODEL,
-        max_tokens=1536,
+        max_tokens=8000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": content}],
+        output_config={"effort": PARSE_EFFORT,
+                       "format": {"type": "json_schema", "schema": PARSE_SCHEMA}},
     )
 
-    raw_text = message.content[0].text if message.content else ""
+    if message.stop_reason == "refusal":
+        raise ValueError("The model declined to estimate this meal.")
+    # Read by block type: the response usually leads with a thinking block.
+    raw_text = next((b.text for b in message.content if b.type == "text"), "")
     try:
-        result = _extract_json(raw_text)
-    except (json.JSONDecodeError, IndexError, AttributeError) as e:
+        result = json.loads(raw_text)
+    except json.JSONDecodeError as e:
         logger.error("parse_meal JSON parse failed: %s\nRaw: %s", e, raw_text)
         raise ValueError(f"Failed to parse Claude response as JSON: {e}") from e
 
-    if "items" not in result or not isinstance(result["items"], list):
-        result["items"] = []
     for field in ("total_calories", "total_protein_g", "total_carbs_g", "total_fat_g", "drinks"):
         val = result.get(field)
         if val is not None:
-            try:
-                result[field] = float(val)
-            except (TypeError, ValueError):
-                result[field] = None
-    result.setdefault("confidence", 0.5)
+            result[field] = float(val)
     result["_raw_text"] = raw_text
     return result

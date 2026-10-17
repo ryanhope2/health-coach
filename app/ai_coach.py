@@ -12,7 +12,10 @@ from . import bp_trends
 from .progress import daily_rollup, goal_baseline, period_baseline, period_position
 from .timeutils import local_now, local_to_utc, local_today, logged_at_for, to_local_date, to_local_time
 
-CHAT_MODEL = "claude-sonnet-4-6"
+CHAT_MODEL = "claude-sonnet-5-5"
+# Medium: the coach's recurring failures have been reasoning about dates and totals, so it
+# gets some thinking; low would be faster to first token. Thinking counts toward max_tokens.
+CHAT_EFFORT = "medium"
 MAX_TOOL_ROUNDS = 5
 
 # Chat history sent each turn: all of today's and yesterday's messages, never fewer than
@@ -834,15 +837,20 @@ def get_response(api_key: str, user, conversation_history: list[dict], new_messa
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.messages.create(
             model=CHAT_MODEL,
-            max_tokens=1024,
+            max_tokens=16000,
             system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": CACHE}],
             tools=TOOLS,
             messages=messages,
+            output_config={"effort": CHAT_EFFORT},
         )
 
+        if response.stop_reason == "refusal":
+            return ("Sorry — I couldn't help with that one. Try rephrasing, or log it directly "
+                    "in the app.")
         if response.stop_reason != "tool_use":
             return "".join(b.text for b in response.content if b.type == "text")
 
+        # Passed back whole and unchanged — including thinking blocks, which the API checks.
         messages.append({"role": "assistant", "content": response.content})
         tool_results = []
         for block in response.content:

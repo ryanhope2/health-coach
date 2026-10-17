@@ -5,7 +5,12 @@ Queue what the model will "say", in order, then exercise the code:
 
     claude.replies_text("Nice work.")
     claude.calls_tool("log_meal", {"calories": 400, "protein_g": 30})
+    claude.replies_json({"headline": "...", "recap": "..."})   # structured output
     claude.saves_recap("Headline.", "Full recap.")
+    claude.refuses()
+
+Current models think by default, so most responses lead with a thinking block (empty text,
+as under the API's default display) — code must read blocks by type, never by position.
 
 Each queued response is consumed by one messages.create() call. Every call's kwargs are
 recorded in claude.calls (system, messages, tools, ...) so tests can assert on what was
@@ -13,6 +18,7 @@ sent. A call with nothing queued raises — an AI call nobody planned for is a t
 not a silent pass.
 """
 import itertools
+import json
 from types import SimpleNamespace
 
 _ids = itertools.count(1)
@@ -20,6 +26,10 @@ _ids = itertools.count(1)
 
 def text_block(text):
     return SimpleNamespace(type="text", text=text)
+
+
+def thinking_block():
+    return SimpleNamespace(type="thinking", thinking="", signature=f"sig_{next(_ids)}")
 
 
 def tool_use_block(name, tool_input):
@@ -37,14 +47,24 @@ class FakeClaude:
         return self
 
     def replies_text(self, text):
-        return self.responds(text_block(text))
+        return self.responds(thinking_block(), text_block(text))
+
+    def replies_json(self, obj):
+        """A structured-output (output_config.format) response: one text block of JSON."""
+        return self.replies_text(json.dumps(obj))
 
     def calls_tool(self, name, tool_input, text=None):
-        blocks = ([text_block(text)] if text else []) + [tool_use_block(name, tool_input)]
+        blocks = [thinking_block()] + ([text_block(text)] if text else []) + [tool_use_block(name, tool_input)]
         return self.responds(*blocks, stop_reason="tool_use")
 
     def saves_recap(self, headline, recap):
-        return self.calls_tool("save_recap", {"headline": headline, "recap": recap})
+        return self.replies_json({"headline": headline, "recap": recap})
+
+    def refuses(self, category="general_harms"):
+        self.queue.append(SimpleNamespace(
+            content=[], stop_reason="refusal",
+            stop_details=SimpleNamespace(type="refusal", category=category, explanation="declined")))
+        return self
 
     def fails(self, exc=RuntimeError("API down")):
         self.queue.append(exc)
