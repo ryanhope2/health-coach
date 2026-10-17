@@ -4,9 +4,11 @@ import csv
 import io
 from datetime import datetime, timedelta
 
-from flask import Blueprint, Response, flash, redirect, render_template, request, session, url_for
+from flask import (Blueprint, Response, current_app, flash, jsonify, redirect, render_template, request,
+                   session, url_for)
 
 from .. import bp_trends
+from ..bp_ai import read_bp_photo
 from ..extensions import db
 from ..models import BloodPressureReading, MedicationChange
 from ..timeutils import local_now, local_to_utc, local_today
@@ -94,6 +96,22 @@ def _safe_next():
     if next_url in (url_for("index"), url_for("body.index"), url_for("bp.index")):
         return next_url
     return url_for("bp.index")
+
+
+@bp_bp.route("/read-photo", methods=["POST"])
+def read_photo():
+    """Read a photo of the monitor and return the numbers as JSON for the page to fill in —
+    nothing is saved (the user still hits Save) and the photo isn't kept."""
+    photo = request.files.get("photo")
+    if not photo or not (photo.mimetype or "").startswith("image/"):
+        return jsonify(error="Choose a photo of the monitor."), 400
+    try:
+        return jsonify(read_bp_photo(current_app.config["ANTHROPIC_API_KEY"], photo.read(), photo.mimetype))
+    except ValueError as e:
+        return jsonify(error=str(e)), 422
+    except Exception:
+        current_app.logger.exception("BP photo read failed")
+        return jsonify(error="Couldn't read the photo right now — type the numbers in instead."), 502
 
 
 @bp_bp.route("/reading/<int:reading_id>/delete", methods=["POST"])

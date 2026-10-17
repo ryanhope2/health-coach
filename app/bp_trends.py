@@ -51,13 +51,17 @@ def parse_bp_text(text):
     nums = [int(n) for n in re.findall(r"\d{2,3}", text or "")]
     if len(nums) < 2:
         return None
-    sys_, dia = nums[0], nums[1]
-    pulse = nums[2] if len(nums) > 2 else None
-    if not (70 <= sys_ <= 260 and 40 <= dia <= 150 and sys_ > dia):
+    return plausible_reading(nums[0], nums[1], nums[2] if len(nums) > 2 else None)
+
+
+def plausible_reading(systolic, diastolic, pulse=None):
+    """{systolic, diastolic, pulse} if the numbers could be a real reading, else None. Shared by
+    typed/dictated text and photos of the monitor, so a misread can't slip through either way."""
+    if not (70 <= systolic <= 260 and 40 <= diastolic <= 150 and systolic > diastolic):
         return None
     if pulse is not None and not 30 <= pulse <= 220:
         return None
-    return {"systolic": sys_, "diastolic": dia, "pulse": pulse}
+    return {"systolic": systolic, "diastolic": diastolic, "pulse": pulse}
 
 
 # --- summaries ----------------------------------------------------------------------------

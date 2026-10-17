@@ -81,6 +81,7 @@ test that reproduces it. No feature or fix is done without a test that was red f
 | `generate_recaps.py` | Sunday cron (11:00 UTC): writes the recap for the week that just ended |
 | `app/blueprints/coach.py` | AI coach chat + `/coach/notes` CRUD for persistent memory |
 | `app/blueprints/bp.py` | Blood pressure: log/delete readings, med-change CRUD, `/bp/` trends page, `/bp/export.csv` |
+| `app/bp_ai.py` | Claude Vision read of a BP monitor photo → systolic/diastolic/pulse (fills the form; nothing saved) |
 | `app/bp_trends.py` | BP math: dictation-friendly `parse_bp_text()`, per-regimen segments with settle days, Sun-Sat weeks, chart data, `load()` |
 | `migrate_exercise.py` | One-time (re-runnable) migration adding the structured exercise columns |
 | `migrate_periods.py` | One-time (re-runnable) migration: `tracking_periods` table, `goals.period_id`, `meal_entries.drinks`, seeds the first period from the old `User` columns |
@@ -392,7 +393,16 @@ advise on meds.
 - **Logging:** a shared card (`bp/_log.html`) on the Body page and `/bp/`, plus a **Blood
   pressure tab** in the dashboard's `quickWeightModal` (Weight | Blood pressure, same tab
   pattern as `quickMealModal`; shows the last reading, posts with `next=/`). The three inputs
-  live in `bp/_fields.html` so all of these share them. Systolic is
+  live in `bp/_fields.html` so all of these share them.
+- **Read from photo:** a camera button in `bp/_fields.html` (file input with **no `name`**, so
+  the photo never rides along with the reading's POST). `bp-log.js` shrinks the image to 1600px
+  JPEG in the browser, posts it to `/bp/read-photo`, and `bp_ai.read_bp_photo()` reads the
+  display with Claude Vision (structured output, low effort, `readable` flag; 0 = pulse not
+  shown). The numbers only **fill the fields** — the user checks and hits Save, same as
+  dictation — and the photo isn't stored. Unreadable/implausible reads (checked by the shared
+  `bp_trends.plausible_reading()`) come back as a 422 with a message shown under the button.
+  (Unlike the scale-photo idea that was dropped — see Quick Weight Entry — a BP monitor's
+  large LCD digits read reliably.) Systolic is
   `type="text"` with no `inputmode` (same dictation reasoning as Quick Weight Entry):
   `bp-log.js` splits "128 over 82 pulse 64" into the three fields on blur, and
   `add_reading()` parses it server-side too if diastolic came in blank. Time defaults to now

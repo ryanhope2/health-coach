@@ -204,3 +204,36 @@ def test_trends_page_links_to_the_csv_with_its_range(client, user):
 
 def test_progress_page_links_to_blood_pressure(client, user):
     assert soup(client.get("/progress/")).find("a", href="/bp/")
+
+
+# --- reading a photo of the monitor --------------------------------------------------------
+
+def photo(content=b"\xff\xd8\xff fake jpeg", name="bp.jpg", mimetype="image/jpeg"):
+    return {"photo": (io.BytesIO(content), name, mimetype)}
+
+
+def test_photo_fills_in_the_reading_without_saving_it(client, claude):
+    claude.replies_json({"readable": True, "systolic": 131, "diastolic": 84, "pulse": 70})
+    r = client.post("/bp/read-photo", data=photo(), content_type="multipart/form-data")
+    assert (r.status_code, r.get_json()) == (200, {"systolic": 131, "diastolic": 84, "pulse": 70})
+    assert BloodPressureReading.query.count() == 0
+
+
+def test_unreadable_photo_says_so(client, claude):
+    claude.replies_json({"readable": False, "systolic": 0, "diastolic": 0, "pulse": 0})
+    r = client.post("/bp/read-photo", data=photo(), content_type="multipart/form-data")
+    assert r.status_code == 422 and "error" in r.get_json()
+
+
+@pytest.mark.parametrize("data", [{}, photo(mimetype="application/pdf", name="x.pdf")])
+def test_photo_route_needs_an_image(client, data):
+    r = client.post("/bp/read-photo", data=data, content_type="multipart/form-data")
+    assert r.status_code == 400 and "error" in r.get_json()
+
+
+def test_bp_forms_have_a_camera_button(client):
+    for url in ("/", "/bp/", "/body/"):
+        page = soup(client.get(url))
+        cam = page.select_one(".bp-log-form input[type=file].bp-photo")
+        assert cam is not None, url
+        assert cam.get("name") is None  # never submitted with the reading itself

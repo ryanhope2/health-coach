@@ -13,3 +13,12 @@
   <label class="form-label small">Pulse</label>
   <input type="text" name="pulse" class="form-control bp-pulse" autocomplete="off" placeholder="opt.">
 </div>
+<div class="col-12 d-flex align-items-center gap-2">
+  {# No name attribute: the photo is only sent to /bp/read-photo by bp-log.js, never with the reading. #}
+  <label class="btn btn-outline-secondary btn-sm mb-0 text-nowrap bp-photo-btn">
+    <i class="bi bi-camera me-1"></i>Read from photo
+    <input type="file" accept="image/*" capture="environment" class="d-none bp-photo"
+           data-url="{{ url_for('bp.read_photo') }}">
+  </label>
+  <span class="small text-muted bp-photo-status"></span>
+</div>

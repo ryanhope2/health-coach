@@ -124,7 +124,7 @@ def test_weight_modal_has_a_weight_tab_and_a_blood_pressure_tab(client):
     assert modal.find(id="weight-tab-pane").find("form", action="/body/stat")
     bp = modal.find(id="bp-tab-pane").find("form", action="/bp/reading")
     assert bp.find("input", {"name": "next"})["value"] == "/"
-    assert {"systolic", "diastolic", "pulse"} <= {i["name"] for i in bp.find_all("input")}
+    assert {"systolic", "diastolic", "pulse"} <= {i.get("name") for i in bp.find_all("input")}
 
 
 def test_blood_pressure_tab_shows_the_last_reading(client, user, clock):
