@@ -41,37 +41,80 @@
 <div class="modal fade" id="quickWeightModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <form method="post" action="{{ url_for('body.add_stat') }}" id="quickWeightForm" class="guard-double-submit">
-        <div class="modal-header">
-          <h5 class="modal-title">Log today's weight &amp; body fat</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <input type="hidden" name="date" value="{{ today }}">
-          <input type="hidden" name="next" value="{{ url_for('index') }}">
-          <div class="mb-3">
-            <label class="form-label">Weight (lbs)</label>
-            <input type="text" name="weight_lbs" id="quickWeightInput"
-                   class="form-control" autofocus placeholder="185.4" autocomplete="off">
-            <div class="form-text">
-              Type a number, or tap the mic on your keyboard to dictate — you can say something like
-              "185.4 pounds and 19 percent body fat" right here.
+      <div class="modal-header pb-0 border-bottom-0">
+        <ul class="nav nav-tabs flex-grow-1" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="weight-tab-btn" data-bs-toggle="tab" data-bs-target="#weight-tab-pane" type="button" role="tab">Weight</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="bp-tab-btn" data-bs-toggle="tab" data-bs-target="#bp-tab-pane" type="button" role="tab">Blood pressure</button>
+          </li>
+        </ul>
+        <button type="button" class="btn-close ms-2 mb-auto mt-1" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="tab-content">
+        <div class="tab-pane fade show active" id="weight-tab-pane" role="tabpanel">
+          <form method="post" action="{{ url_for('body.add_stat') }}" id="quickWeightForm" class="guard-double-submit">
+            <div class="modal-body">
+              <input type="hidden" name="date" value="{{ today }}">
+              <input type="hidden" name="next" value="{{ url_for('index') }}">
+              <div class="mb-3">
+                <label class="form-label">Weight (lbs)</label>
+                <input type="text" name="weight_lbs" id="quickWeightInput"
+                       class="form-control" autofocus placeholder="185.4" autocomplete="off">
+                <div class="form-text">
+                  Type a number, or tap the mic on your keyboard to dictate — you can say something like
+                  "185.4 pounds and 19 percent body fat" right here.
+                </div>
+              </div>
+              <div class="mb-1">
+                <label class="form-label">Body fat % (optional)</label>
+                <input type="text" name="body_fat_pct" id="quickBodyFatInput"
+                       class="form-control" placeholder="19" autocomplete="off">
+              </div>
             </div>
-          </div>
-          <div class="mb-1">
-            <label class="form-label">Body fat % (optional)</label>
-            <input type="text" name="body_fat_pct" id="quickBodyFatInput"
-                   class="form-control" placeholder="19" autocomplete="off">
-          </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-success">Save</button>
+            </div>
+          </form>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-success">Save</button>
+        <div class="tab-pane fade" id="bp-tab-pane" role="tabpanel">
+          <form method="post" action="{{ url_for('bp.add_reading') }}" id="quickBpForm" class="guard-double-submit bp-log-form">
+            <div class="modal-body">
+              <input type="hidden" name="date" value="{{ today }}">
+              <input type="hidden" name="next" value="{{ url_for('index') }}">
+              <div class="row g-2">
+                {% include "bp/_fields.html" %}
+                <div class="col-6">
+                  <label class="form-label small">Time</label>
+                  <input type="time" name="time" class="form-control bp-time" value="{{ now }}">
+                </div>
+                <div class="col-6">
+                  <label class="form-label small">Notes</label>
+                  <input type="text" name="notes" class="form-control" placeholder="optional">
+                </div>
+              </div>
+              <div class="form-text">Or say “128 over 82 pulse 64” into the first box.</div>
+              {% if last_bp %}
+                <div class="small text-muted mt-2">
+                  Last: <strong class="text-body">{{ last_bp.systolic }}/{{ last_bp.diastolic }}</strong>{% if last_bp.pulse %} ♥ {{ last_bp.pulse }}{% endif %}
+                  · {{ last_bp.at.strftime('%a %-I:%M %p') }}
+                </div>
+              {% endif %}
+            </div>
+            <div class="modal-footer">
+              <a href="{{ url_for('bp.index') }}" class="btn btn-link me-auto px-0">Trends</a>
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-success">Save</button>
+            </div>
+          </form>
         </div>
-      </form>
+      </div>
     </div>
   </div>
 </div>
+
 
 <div class="modal fade" id="quickExerciseModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -273,6 +316,7 @@
 <script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
 <script src="{{ url_for('static', filename='js/quick-meal-type.js') }}"></script>
 <script src="{{ url_for('static', filename='js/coach-chat.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bp-log.js') }}"></script>
 <script>
   (function () {
     var form = document.getElementById('quickExerciseForm');
@@ -310,12 +354,18 @@
     var weightInput = document.getElementById('quickWeightInput');
     var bodyFatInput = document.getElementById('quickBodyFatInput');
 
-    modalEl.addEventListener('shown.bs.modal', function () {
-      weightInput.focus();
-    });
+    var bpForm = document.getElementById('quickBpForm');
+    var bpSystolic = bpForm.querySelector('.bp-systolic');
+    function focusActiveTab() {
+      (document.getElementById('bp-tab-pane').classList.contains('active') ? bpSystolic : weightInput).focus();
+    }
+    modalEl.addEventListener('shown.bs.modal', focusActiveTab);
+    document.getElementById('weight-tab-btn').addEventListener('shown.bs.tab', focusActiveTab);
+    document.getElementById('bp-tab-btn').addEventListener('shown.bs.tab', focusActiveTab);
     modalEl.addEventListener('hidden.bs.modal', function () {
       weightInput.value = '';
       bodyFatInput.value = '';
+      bpForm.querySelectorAll('.bp-systolic, .bp-diastolic, .bp-pulse, [name="notes"]').forEach(function (el) { el.value = ''; });
     });
 
     // Pull a weight and (optionally) a body fat % out of one free-text field,

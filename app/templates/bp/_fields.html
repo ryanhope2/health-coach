@@ -1,0 +1,15 @@
+{# Systolic / diastolic / pulse inputs, shared by the BP log card and the dashboard's quick
+   modal. Plain type="text" with no inputmode so the keyboard's dictation mic is there;
+   bp-log.js splits "128 over 82 pulse 64" spoken into the first box. #}
+<div class="col-4">
+  <label class="form-label small">Systolic</label>
+  <input type="text" name="systolic" class="form-control bp-systolic" autocomplete="off" placeholder="128">
+</div>
+<div class="col-4">
+  <label class="form-label small">Diastolic</label>
+  <input type="text" name="diastolic" class="form-control bp-diastolic" autocomplete="off" placeholder="82">
+</div>
+<div class="col-4">
+  <label class="form-label small">Pulse</label>
+  <input type="text" name="pulse" class="form-control bp-pulse" autocomplete="off" placeholder="opt.">
+</div>

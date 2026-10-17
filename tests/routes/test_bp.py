@@ -48,7 +48,7 @@ def test_rejects_incomplete_or_implausible_readings(client, data):
 
 
 @pytest.mark.parametrize("next_url, location", [
-    ("/body/", "/body/"), (None, "/bp/"), ("//evil.example", "/bp/"),
+    ("/", "/"), ("/body/", "/body/"), (None, "/bp/"), ("//evil.example", "/bp/"),
 ])
 def test_reading_redirect_target_is_allowlisted(client, next_url, location):
     data = {"systolic": "128", "diastolic": "82"} | ({"next": next_url} if next_url else {})

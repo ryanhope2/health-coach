@@ -195,7 +195,8 @@ class of route where double-submission isn't actually a problem.
 ## Quick Weight Entry (dashboard)
 
 Tapping the Weight or Body Fat tile on the dashboard (`app/templates/index.html`) opens
-a Bootstrap modal that posts straight to `body.add_stat` for today's date — no need to
+a Bootstrap modal (Weight tab; a second tab logs blood pressure — see Blood Pressure below)
+whose Weight form posts straight to `body.add_stat` for today's date — no need to
 visit the Body page for the common case of "just log today's number." The weight and
 body-fat fields are plain `type="text"` inputs with **no `inputmode` hint** (not
 `type="number"`, not `inputmode="decimal"` either — see gotcha below), specifically so
@@ -388,7 +389,10 @@ before/after comparison** — so there are deliberately **no BP categories** any
 said they aren't useful), no warning banners, and the coach is told not to classify readings or
 advise on meds.
 
-- **Logging:** a shared card (`bp/_log.html`) on the Body page and `/bp/`. Systolic is
+- **Logging:** a shared card (`bp/_log.html`) on the Body page and `/bp/`, plus a **Blood
+  pressure tab** in the dashboard's `quickWeightModal` (Weight | Blood pressure, same tab
+  pattern as `quickMealModal`; shows the last reading, posts with `next=/`). The three inputs
+  live in `bp/_fields.html` so all of these share them. Systolic is
   `type="text"` with no `inputmode` (same dictation reasoning as Quick Weight Entry):
   `bp-log.js` splits "128 over 82 pulse 64" into the three fields on blur, and
   `add_reading()` parses it server-side too if diastolic came in blank. Time defaults to now

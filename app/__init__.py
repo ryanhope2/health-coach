@@ -86,8 +86,9 @@ def create_app(config=None, instance_path=None):
     @app.route("/")
     def index():
         from . import progress
+        from .blueprints.bp import recent_readings
         from .models import BodyStat, ChatMessage, ExerciseEntry, MealEntry, SavedMeal, User
-        from .timeutils import local_today, to_local_date
+        from .timeutils import local_now, local_today, to_local_date
 
         user = User.query.get(session["user_id"])
         today = local_today()
@@ -206,6 +207,8 @@ def create_app(config=None, instance_path=None):
             exercise_color=exercise["color"],
             messages=recent_chat,
             today=today.isoformat(),
+            last_bp=(recent_readings(user.id) or [None])[0],
+            now=local_now().strftime("%H:%M"),
             saved_drinks=saved_drinks,
             saved_meals=saved_meals,
         )

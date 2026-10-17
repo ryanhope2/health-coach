@@ -91,7 +91,7 @@ def add_reading():
 def _safe_next():
     """Redirect target for add_reading — allowlisted to avoid an open redirect via `next`."""
     next_url = request.form.get("next")
-    if next_url in (url_for("body.index"), url_for("bp.index")):
+    if next_url in (url_for("index"), url_for("body.index"), url_for("bp.index")):
         return next_url
     return url_for("bp.index")
 

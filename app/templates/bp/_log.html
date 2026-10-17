@@ -1,8 +1,6 @@
 {# Log-a-reading card + recent readings. Shared by the Body page and /bp/; needs `recent`,
-   `today`, `now`, and `next_url` (where to land after saving/deleting). The systolic field is
-   plain type="text" with no inputmode, like the dashboard's quick weight field, so the phone
-   keyboard's dictation mic works — "128 over 82 pulse 64" is split into the three fields on
-   blur by bp-log.js (and server-side if JS didn't run). #}
+   `today`, `now`, and `next_url` (where to land after saving/deleting). The inputs come from
+   bp/_fields.html (dictation-friendly; also used by the dashboard's quick modal). #}
 <div class="card">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span>Log blood pressure</span>
@@ -13,18 +11,7 @@
   <div class="card-body">
     <form method="post" action="{{ url_for('bp.add_reading') }}" class="row g-2 guard-double-submit bp-log-form">
       <input type="hidden" name="next" value="{{ next_url }}">
-      <div class="col-4">
-        <label class="form-label small">Systolic</label>
-        <input type="text" name="systolic" class="form-control bp-systolic" autocomplete="off" placeholder="128">
-      </div>
-      <div class="col-4">
-        <label class="form-label small">Diastolic</label>
-        <input type="text" name="diastolic" class="form-control bp-diastolic" autocomplete="off" placeholder="82">
-      </div>
-      <div class="col-4">
-        <label class="form-label small">Pulse</label>
-        <input type="text" name="pulse" class="form-control bp-pulse" autocomplete="off" placeholder="opt.">
-      </div>
+      {% include "bp/_fields.html" %}
       <div class="col-6">
         <label class="form-label small">Date</label>
         <input type="date" name="date" class="form-control" value="{{ today }}">
