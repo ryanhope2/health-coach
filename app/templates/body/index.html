@@ -64,6 +64,12 @@
   </div>
 </div>
 
+<div class="row g-3 mb-4">
+  <div class="col-12 col-lg-6">
+    {% with next_url = url_for('body.index') %}{% include "bp/_log.html" %}{% endwith %}
+  </div>
+</div>
+
 <div class="row g-3">
   <div class="col-12 col-lg-6">
     <div class="card">
@@ -131,4 +137,5 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bp-log.js') }}"></script>
 {% endblock %}

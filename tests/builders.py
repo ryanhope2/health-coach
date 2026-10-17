@@ -6,11 +6,12 @@ Dates: tests anchor on a fixed Sunday (SUNDAY) rather than the real today — us
 `day(n)` for SUNDAY + n days.
 """
 from datetime import date, datetime, timedelta
+from datetime import time as clock_time
 from zoneinfo import ZoneInfo
 
 from app.extensions import db
-from app.models import (BodyStat, ChatMessage, CoachNote, ExerciseEntry, Goal, MealEntry,
-                        Measurement, SavedMeal, TrackingPeriod, WeeklyRecap)
+from app.models import (BloodPressureReading, BodyStat, ChatMessage, CoachNote, ExerciseEntry, Goal, MealEntry,
+                        Measurement, MedicationChange, SavedMeal, TrackingPeriod, WeeklyRecap)
 from app.timeutils import USER_TIMEZONE
 
 UTC = ZoneInfo("UTC")
@@ -95,3 +96,15 @@ def make_chat(user, role="user", content="hi", at=None):
 def make_recap(user, week_start=SUNDAY, content="A recap.", headline="Headline.", covers_through=None):
     return _save(WeeklyRecap(user_id=user.id, week_start=week_start, content=content, headline=headline,
                              covers_through=covers_through or week_start + timedelta(days=6)))
+
+
+def log_bp(user, d=None, time="07:00", systolic=130, diastolic=85, pulse=None, notes=None):
+    return _save(BloodPressureReading(user_id=user.id, taken_at=local_dt(d or SUNDAY, time),
+                                      systolic=systolic, diastolic=diastolic, pulse=pulse, notes=notes))
+
+
+def make_med_change(user, d=None, description="Amlodipine 5 → 10 mg", time=None, notes=None):
+    """`time` is "HH:MM" local, or None for a date-only change."""
+    t = clock_time(*map(int, time.split(":"))) if time else None
+    return _save(MedicationChange(user_id=user.id, date=d or SUNDAY, time=t,
+                                  description=description, notes=notes))

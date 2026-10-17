@@ -51,3 +51,10 @@ def logged_at_for(d: date) -> datetime:
     if d == local_today():
         return datetime.utcnow()
     return local_date_to_utc_noon(d)
+
+
+def local_to_utc(d: date, t) -> datetime:
+    """Naive-UTC datetime for local date `d` at local time `t` (a datetime.time) — for
+    storing a time the user typed in their own timezone."""
+    local = datetime(d.year, d.month, d.day, t.hour, t.minute, tzinfo=USER_TIMEZONE)
+    return local.astimezone(_UTC).replace(tzinfo=None)

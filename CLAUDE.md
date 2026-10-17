@@ -80,6 +80,8 @@ test that reproduces it. No feature or fix is done without a test that was red f
 | `app/recap.py` | Builds the weekly-recap prompt from `progress.py` numbers + notes/meals/workouts/chat, calls Claude, upserts `WeeklyRecap` |
 | `generate_recaps.py` | Sunday cron (11:00 UTC): writes the recap for the week that just ended |
 | `app/blueprints/coach.py` | AI coach chat + `/coach/notes` CRUD for persistent memory |
+| `app/blueprints/bp.py` | Blood pressure: log/delete readings, med-change CRUD, `/bp/` trends page, `/bp/export.csv` |
+| `app/bp_trends.py` | BP math: dictation-friendly `parse_bp_text()`, per-regimen segments with settle days, Sun-Sat weeks, chart data, `load()` |
 | `migrate_exercise.py` | One-time (re-runnable) migration adding the structured exercise columns |
 | `migrate_periods.py` | One-time (re-runnable) migration: `tracking_periods` table, `goals.period_id`, `meal_entries.drinks`, seeds the first period from the old `User` columns |
 | `init_db.py` | Create tables, seed the first user from `AUTH_USERNAME`/`AUTH_PASSWORD` |
@@ -125,6 +127,10 @@ test that reproduces it. No feature or fix is done without a test that was red f
   also bodyweight moves like pushups), `hang` (sets, hang_seconds, rest_seconds). `NULL`
   is a legacy row, treated as cardio. Columns added by `migrate_exercise.py`; entries are
   editable via a modal on `/exercise/`
+- **BloodPressureReading** — one reading (`taken_at` naive UTC, systolic/diastolic, optional
+  pulse/notes). Several per day, so keyed by time — not upserted by date like `BodyStat`
+- **MedicationChange** — a dated marker on the BP timeline ("Amlodipine 5 → 10 mg"): local
+  `date`, optional local `time` (midnight when unset), description, notes. Not a med list
 - **Goal** — target value for a `goal_type` (weight, body_fat_pct, or a measurement),
   with starting value (captured from the latest entry when the goal is created) and
   optional target date
@@ -373,6 +379,36 @@ only use days with ≥1 confirmed meal and exclude today (a half-logged day woul
 average down); drinks and exercise *do* count today, since those have already happened.
 Strength = `exercise_type` `sets` or `hang`.
 
+## Blood Pressure (`/bp/`)
+
+The user is on BP meds under a cardiologist; the point is a **baseline before a med change and a
+before/after comparison** — so there are deliberately **no BP categories** anywhere (the user
+said they aren't useful), no warning banners, and the coach is told not to classify readings or
+advise on meds.
+
+- **Logging:** a shared card (`bp/_log.html`) on the Body page and `/bp/`. Systolic is
+  `type="text"` with no `inputmode` (same dictation reasoning as Quick Weight Entry):
+  `bp-log.js` splits "128 over 82 pulse 64" into the three fields on blur, and
+  `add_reading()` parses it server-side too if diastolic came in blank. Time defaults to now
+  and is editable. The coach logs via `log_blood_pressure` (one call per reading).
+- **Regimens:** each `MedicationChange` starts a new regimen; a reading belongs to the latest
+  change at or before it (`regimen_label()`), else "Baseline". `segments()` averages each regimen,
+  skipping the first `settle` days after its change (default 7, `?settle=` 0/3/7/14 on the page) so
+  a dose that hasn't taken effect doesn't muddy the comparison, and shows the delta vs. the previous
+  regimen. Morning/evening split at noon local. Until the first change, the page shows baseline
+  progress instead: days with both a morning and evening reading, toward 7.
+- **Page:** regimen comparison (always all readings), Chart.js chart (AM filled / PM hollow dots,
+  7-day averages, dashed med-change lines via a small inline plugin), Sun-Sat weeks that expand
+  to each reading with a 💊 line in a change's week, log card, med-change add/edit/delete. The
+  All/90d/30d range only narrows the chart, weeks, and CSV. Linked from the Body and Progress
+  pages, not the navbar.
+- **CSV** (`/bp/export.csv?days=`): readings in local time, oldest first, each with a `regimen`
+  column; then a blank row and a "Medication changes" section (`date,time,change,notes`). The
+  user chose the regimen column + changes-at-the-bottom over inline change rows. UTF-8 BOM so
+  Excel shows "→" correctly.
+- **New tables only** (no column changes): `./run init-db` (`create_all`, safe to re-run) after
+  deploying creates them.
+
 ## Meal Logging Flow
 
 1. User submits a photo and/or free-text description at `/meals/new`
@@ -588,6 +624,8 @@ Each turn, `ai_coach.build_context_summary()` pulls:
   targets and what's left (`_today_line()`, from `progress.daily_rollup()`)
 - last 60 days of weight/body fat
 - last 90 days of measurements
+- blood pressure (`_bp_lines()`): each regimen's settled averages and delta (same numbers as
+  `/bp/`), the med changes, and the last 14 days of readings with local times
 - last 14 *local* days of meals (confirmed only), rolled up to daily totals, plus the last 3
   days line by line with local time of day; photo-only meals show their parsed `FoodItem`
   names (they have no description)
@@ -649,8 +687,9 @@ Confirmed fixed live: the same question on the same Sunday now correctly answers
 that Sunday-through-Saturday window and counts only today's entry so far.
 
 **Tool use:** `get_response()` runs a tool-use loop (`TOOLS` in `app/ai_coach.py`) with
-eight tools — `log_body_stat`, `log_measurement`, `log_meal`, `log_exercise`, `set_goal`,
-`set_nutrition_targets`, `save_note`, `delete_note` — each of which writes directly to
+ten tools — `log_body_stat`, `log_measurement`, `log_meal`, `log_exercise`,
+`log_blood_pressure`, `log_med_change`, `set_goal`, `set_nutrition_targets`, `save_note`,
+`delete_note` — each of which writes directly to
 the DB via `_execute_tool()`, scoped to the current user. `set_goal` and
 `set_nutrition_targets` act on the current `TrackingPeriod` (goals attach to it and default
 to its end date; targets are the period's, and the tool errors if no period exists). The system prompt explicitly forbids claiming something was

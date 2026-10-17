@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}Blood pressure — Moron Fitness{% endblock %}
+
+{% macro bp(s) %}{% if s.systolic is not none %}{{ s.systolic }}/{{ s.diastolic }}{% else %}—{% endif %}{% endmacro %}
+{% macro signed(v) %}{{ '+' if v > 0 else ('−' if v < 0 else '±') }}{{ v|abs }}{% endmacro %}
+{% macro range_link(value, label) %}
+  <a href="{{ url_for('bp.index', days=value, settle=settle if settle != 7 else None) }}"
+     class="btn btn-sm {{ 'btn-secondary' if days == value else 'btn-outline-secondary' }}">{{ label }}</a>
+{% endmacro %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h1 class="h4 mb-0">Blood pressure</h1>
+  <div class="d-flex gap-2 align-items-center">
+    <div class="btn-group" role="group" aria-label="Range">
+      {{ range_link(None, 'All') }}{{ range_link('90', '90d') }}{{ range_link('30', '30d') }}
+    </div>
+    <a href="{{ url_for('bp.export_csv', days=days) }}" class="btn btn-sm btn-outline-primary">
+      <i class="bi bi-download me-1"></i>CSV</a>
+  </div>
+</div>
+
+{% if not has_readings %}
+  <div class="card mb-3" id="bpEmpty">
+    <div class="card-body text-muted">
+      No readings yet. For a solid baseline, take two readings a minute apart each morning and
+      evening for a week — log them below.
+    </div>
+  </div>
+{% endif %}
+
+{# Baseline progress — until the first med change is logged #}
+{% if baseline and has_readings %}
+  <div class="card mb-3" id="baseline">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-baseline mb-1">
+        <span class="fw-semibold">Baseline so far</span>
+        {% if baseline.done %}<span class="badge rounded-pill text-bg-success">complete</span>{% endif %}
+      </div>
+      <div class="stat-tiles mb-2">
+        <div class="stat-tile"><div class="label">Average</div><div class="value">{{ bp(baseline_stats) }}</div>
+          <div class="sub">{{ baseline_stats.n }} readings · {{ baseline_stats.days }} day{{ '' if baseline_stats.days == 1 else 's' }}</div></div>
+        <div class="stat-tile"><div class="label">Morning</div><div class="value">{{ bp(baseline_stats.am) }}</div>
+          <div class="sub">{{ baseline_stats.am.n }} readings</div></div>
+        <div class="stat-tile"><div class="label">Evening</div><div class="value">{{ bp(baseline_stats.pm) }}</div>
+          <div class="sub">{{ baseline_stats.pm.n }} readings</div></div>
+        <div class="stat-tile"><div class="label">Pulse</div><div class="value">{{ baseline_stats.pulse or '—' }}</div>
+          <div class="sub">bpm avg</div></div>
+      </div>
+      <div class="small text-muted mb-1">
+        {{ baseline.complete_days }} of {{ baseline.target }} days with morning + evening readings
+        · {{ baseline.mornings }} mornings, {{ baseline.evenings }} evenings
+      </div>
+      <div class="progress" style="height: 6px;" role="progressbar" aria-label="Baseline days"
+           aria-valuenow="{{ baseline.complete_days }}" aria-valuemin="0" aria-valuemax="{{ baseline.target }}">
+        <div class="progress-bar {{ 'bg-success' if baseline.done else 'bg-secondary' }}"
+             style="width: {{ [100, (100 * baseline.complete_days / baseline.target)|round|int]|min }}%"></div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{# Before / after — one row per regimen, newest first #}
+{% if changes %}
+  <div class="card mb-3" id="regimens">
+    <div class="card-body pb-2">
+      <div class="small text-muted">By regimen</div>
+      <form method="get" class="d-flex align-items-center gap-1 small text-muted mb-1">
+        {% if days %}<input type="hidden" name="days" value="{{ days }}">{% endif %}
+        <label for="settle" class="mb-0 text-nowrap">Averages skip</label>
+        <select id="settle" name="settle" class="form-select form-select-sm py-0" style="width:auto" onchange="this.form.submit()">
+          {% for n in [0, 3, 7, 14] %}<option value="{{ n }}" {{ 'selected' if n == settle }}>{{ n }}</option>{% endfor %}
+        </select>
+        <span class="text-nowrap">days after a change</span>
+      </form>
+      {% for s in segments %}
+        <div class="regimen py-2 {{ 'border-top' if not loop.first }}">
+          <div class="d-flex justify-content-between align-items-baseline">
+            <span class="regimen-label fw-semibold">{{ s.label }}</span>
+            <span class="small text-muted">
+              {% if s.start %}since {{ s.start.strftime('%b %-d') }}{% else %}before changes{% endif %}
+            </span>
+          </div>
+          <div class="d-flex justify-content-between align-items-baseline small mt-1">
+            <span><strong class="fs-6">{{ bp(s.stats) }}</strong>
+              {% if s.delta %}<span class="ms-1 {{ 'text-success' if s.delta.systolic < 0 else ('text-danger' if s.delta.systolic > 0 else 'text-muted') }}">{{ signed(s.delta.systolic) }}/{{ signed(s.delta.diastolic) }}</span>{% endif %}
+            </span>
+            <span class="text-muted">AM {{ bp(s.stats.am) }} · PM {{ bp(s.stats.pm) }}{% if s.stats.pulse %} · ♥ {{ s.stats.pulse }}{% endif %}</span>
+          </div>
+          <div class="small text-muted">
+            {{ s.stats.n }} reading{{ '' if s.stats.n == 1 else 's' }} counted
+            {% if s.counts_from and s.readings|length > s.stats.n %}· counting from {{ s.counts_from.strftime('%b %-d') }}{% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
+{% if chart %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="weight-chart-wrap"><canvas id="bpChart" aria-label="Blood pressure readings with 7-day averages and medication changes"></canvas></div>
+    </div>
+  </div>
+{% endif %}
+
+{% if weeks %}
+  <div class="card mb-3" id="bpWeeks">
+    <div class="card-body pb-2">
+      <div class="d-flex justify-content-between small text-muted mb-1">
+        <span>Weeks</span><span>tap a week for each reading</span>
+      </div>
+      <div class="week-row bp-row week-head"><span>Week</span><span>Avg</span><span>AM</span><span>PM</span><span>#</span></div>
+      {% for w in weeks %}
+        <details class="week">
+          <summary class="week-row bp-row">
+            <span>{{ w.start.strftime('%-m/%-d') }}{% if w.in_progress %}*{% endif %}</span>
+            <span>{{ bp(w.stats) }}</span>
+            <span>{{ bp(w.stats.am) }}</span>
+            <span>{{ bp(w.stats.pm) }}</span>
+            <span>{{ w.stats.n }}</span>
+          </summary>
+          {% for c in w.changes %}
+            <div class="small text-primary ms-1 mb-1">💊 {{ c.at.strftime('%a %-m/%-d') }}{% if c.has_time %} {{ c.at.strftime('%-I:%M %p') }}{% endif %} — {{ c.description }}</div>
+          {% endfor %}
+          {% if w.days %}
+            <div class="week-days small py-1">
+              {% for d in w.days %}
+                <div class="d-flex gap-2 py-1">
+                  <span class="text-muted" style="width: 2.5rem">{{ d.date.strftime('%a') }}</span>
+                  <span>{% for r in d.readings %}<span class="text-nowrap me-2"><span class="text-muted">{{ r.at.strftime('%-I:%M%p')|lower }}</span> {{ r.systolic }}/{{ r.diastolic }}{% if r.pulse %} <span class="text-muted">♥{{ r.pulse }}</span>{% endif %}</span>{% endfor %}</span>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </details>
+      {% endfor %}
+      <div class="small text-muted mt-1">* in progress · AM = before noon</div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-lg-6">
+    {% with next_url = url_for('bp.index') %}{% include "bp/_log.html" %}{% endwith %}
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card" id="medChanges">
+      <div class="card-header">Medication changes</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('bp.add_med_change') }}" class="row g-2 guard-double-submit">
+          <div class="col-6">
+            <label class="form-label small">Date</label>
+            <input type="date" name="date" class="form-control" value="{{ today }}" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label small">Time (optional)</label>
+            <input type="time" name="time" class="form-control">
+          </div>
+          <div class="col-12">
+            <input type="text" name="description" class="form-control" placeholder="What changed, e.g. Amlodipine 5 → 10 mg" maxlength="200" required>
+          </div>
+          <div class="col-12">
+            <input type="text" name="notes" class="form-control form-control-sm" placeholder="Notes (optional)">
+          </div>
+          <div class="col-12"><button class="btn btn-success">Add</button></div>
+        </form>
+      </div>
+      {% if changes %}
+        <div class="list-group list-group-flush">
+          {% for c in changes %}
+            <details class="list-group-item">
+              <summary class="small">
+                <strong>{{ c.at.strftime('%b %-d, %Y') }}{% if c.has_time %} {{ c.at.strftime('%-I:%M %p') }}{% endif %}</strong>
+                — {{ c.description }}{% if c.notes %} <span class="text-muted">· {{ c.notes }}</span>{% endif %}
+              </summary>
+              <form method="post" action="{{ url_for('bp.update_med_change', change_id=c.id) }}" class="row g-2 mt-1 guard-double-submit">
+                <div class="col-6"><input type="date" name="date" class="form-control form-control-sm" value="{{ c.at.date().isoformat() }}" required></div>
+                <div class="col-6"><input type="time" name="time" class="form-control form-control-sm" value="{{ c.at.strftime('%H:%M') if c.has_time else '' }}"></div>
+                <div class="col-12"><input type="text" name="description" class="form-control form-control-sm" value="{{ c.description }}" maxlength="200" required></div>
+                <div class="col-12"><input type="text" name="notes" class="form-control form-control-sm" value="{{ c.notes or '' }}" placeholder="Notes"></div>
+                <div class="col-12"><button class="btn btn-sm btn-primary">Save</button></div>
+              </form>
+              <form method="post" action="{{ url_for('bp.delete_med_change', change_id=c.id) }}" class="mt-2"
+                    onsubmit="return confirm('Delete this med change?')">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Delete</button>
+              </form>
+            </details>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/guard-double-submit.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bp-log.js') }}"></script>
+{% if chart %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+  (function () {
+    var c = {{ chart|tojson }};
+    var start = new Date(c.start + 'T00:00:00');
+    function dayLabel(x) {
+      var d = new Date(start.getTime() + Math.floor(x) * 86400000);
+      return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+    }
+    function pts(pairs) { return (pairs || []).map(function (p) { return {x: p[0], y: p[1]}; }); }
+    var SYS = '#dc3545', DIA = '#0d6efd';
+
+    // Med changes: a dashed vertical line + label at each change. A tiny inline plugin rather
+    // than chartjs-plugin-annotation — one less CDN dependency for one feature.
+    var changeLines = {
+      id: 'changeLines',
+      afterDatasetsDraw: function (chart) {
+        var ctx = chart.ctx, x = chart.scales.x, y = chart.scales.y;
+        ctx.save();
+        ctx.font = '11px system-ui, sans-serif';
+        ctx.fillStyle = '#6c757d';
+        c.changes.forEach(function (m, i) {
+          var px = x.getPixelForValue(m.x);
+          if (px < x.left || px > x.right) return;
+          ctx.strokeStyle = 'rgba(108,117,125,.8)';
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath(); ctx.moveTo(px, y.top); ctx.lineTo(px, y.bottom); ctx.stroke();
+          ctx.setLineDash([]);
+          var label = '💊 ' + m.label;
+          var w = ctx.measureText(label).width;
+          ctx.fillText(label, Math.min(px + 3, x.right - w), y.top + 12 + (i % 2) * 13);
+        });
+        ctx.restore();
+      },
+    };
+
+    new Chart(document.getElementById('bpChart'), {
+      type: 'line',
+      data: {datasets: [
+        {label: 'Systolic AM', data: pts(c.am_sys), showLine: false, pointRadius: 3, backgroundColor: SYS, borderColor: SYS, pointBorderWidth: 0},
+        {label: 'Systolic PM', data: pts(c.pm_sys), showLine: false, pointRadius: 3, backgroundColor: '#fff', borderColor: SYS, pointBorderWidth: 1.5},
+        {label: 'Diastolic AM', data: pts(c.am_dia), showLine: false, pointRadius: 3, backgroundColor: DIA, borderColor: DIA, pointBorderWidth: 0},
+        {label: 'Diastolic PM', data: pts(c.pm_dia), showLine: false, pointRadius: 3, backgroundColor: '#fff', borderColor: DIA, pointBorderWidth: 1.5},
+        {label: 'Systolic 7-day', data: pts(c.rolling_sys), borderColor: SYS, backgroundColor: SYS, borderWidth: 2, pointRadius: 0, pointStyle: 'line', tension: 0.25},
+        {label: 'Diastolic 7-day', data: pts(c.rolling_dia), borderColor: DIA, backgroundColor: DIA, borderWidth: 2, pointRadius: 0, pointStyle: 'line', tension: 0.25},
+      ]},
+      plugins: [changeLines],
+      options: {
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: {mode: 'nearest', intersect: false},
+        scales: {
+          x: {type: 'linear', min: 0, max: c.total_days,
+              ticks: {stepSize: Math.max(1, Math.ceil(c.total_days / 6)), callback: dayLabel, maxRotation: 0},
+              grid: {display: false}},
+          y: {ticks: {precision: 0}, grace: '8%'},
+        },
+        plugins: {
+          legend: {position: 'bottom', labels: {usePointStyle: true, boxWidth: 8, boxHeight: 8, font: {size: 11}}},
+          tooltip: {callbacks: {
+            title: function (items) { return dayLabel(items[0].parsed.x); },
+            label: function (item) { return item.dataset.label + ': ' + Math.round(item.parsed.y); },
+          }},
+        },
+      },
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

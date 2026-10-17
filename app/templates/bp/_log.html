@@ -1,0 +1,64 @@
+{# Log-a-reading card + recent readings. Shared by the Body page and /bp/; needs `recent`,
+   `today`, `now`, and `next_url` (where to land after saving/deleting). The systolic field is
+   plain type="text" with no inputmode, like the dashboard's quick weight field, so the phone
+   keyboard's dictation mic works — "128 over 82 pulse 64" is split into the three fields on
+   blur by bp-log.js (and server-side if JS didn't run). #}
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Log blood pressure</span>
+    {% if request.blueprint != 'bp' %}
+      <a href="{{ url_for('bp.index') }}" class="small text-decoration-none">Trends &amp; CSV <i class="bi bi-arrow-right"></i></a>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('bp.add_reading') }}" class="row g-2 guard-double-submit bp-log-form">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <div class="col-4">
+        <label class="form-label small">Systolic</label>
+        <input type="text" name="systolic" class="form-control bp-systolic" autocomplete="off" placeholder="128">
+      </div>
+      <div class="col-4">
+        <label class="form-label small">Diastolic</label>
+        <input type="text" name="diastolic" class="form-control bp-diastolic" autocomplete="off" placeholder="82">
+      </div>
+      <div class="col-4">
+        <label class="form-label small">Pulse</label>
+        <input type="text" name="pulse" class="form-control bp-pulse" autocomplete="off" placeholder="opt.">
+      </div>
+      <div class="col-6">
+        <label class="form-label small">Date</label>
+        <input type="date" name="date" class="form-control" value="{{ today }}">
+      </div>
+      <div class="col-6">
+        <label class="form-label small">Time</label>
+        <input type="time" name="time" class="form-control bp-time" value="{{ now }}">
+      </div>
+      <div class="col-12">
+        <input type="text" name="notes" class="form-control form-control-sm" placeholder="Notes (optional)">
+      </div>
+      <div class="col-12">
+        <button class="btn btn-success">Save</button>
+        <span class="small text-muted ms-2">Tip: say “128 over 82 pulse 64” into the first box.</span>
+      </div>
+    </form>
+  </div>
+  {% if recent %}
+    <ul class="list-group list-group-flush small" id="bpRecent">
+      {% for r in recent %}
+        <li class="list-group-item d-flex justify-content-between align-items-center py-1">
+          <span>
+            <span class="text-muted">{{ r.at.strftime('%a %-m/%-d %-I:%M %p') }}</span>
+            <strong class="ms-2">{{ r.systolic }}/{{ r.diastolic }}</strong>
+            {% if r.pulse %}<span class="text-muted ms-1">♥ {{ r.pulse }}</span>{% endif %}
+            {% if r.notes %}<span class="text-muted ms-1">· {{ r.notes }}</span>{% endif %}
+          </span>
+          <form method="post" action="{{ url_for('bp.delete_reading', reading_id=r.id) }}"
+                onsubmit="return confirm('Delete this reading?')">
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <button class="btn btn-sm btn-link text-danger p-0"><i class="bi bi-trash"></i></button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>

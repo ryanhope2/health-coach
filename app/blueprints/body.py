@@ -4,7 +4,8 @@ from flask import Blueprint, flash, redirect, render_template, request, session,
 
 from ..extensions import db
 from ..models import MEASUREMENT_METRICS, BodyStat, Measurement
-from ..timeutils import local_today
+from ..timeutils import local_now, local_today
+from .bp import recent_readings
 
 body_bp = Blueprint("body", __name__, url_prefix="/body")
 
@@ -27,6 +28,8 @@ def index():
         measurements_by_metric=measurements_by_metric,
         metrics=MEASUREMENT_METRICS,
         today=local_today().isoformat(),
+        now=local_now().strftime("%H:%M"),
+        recent=recent_readings(user_id),
     )
 
 

@@ -178,3 +178,5 @@ details.week[open] > summary { font-weight: 600; }
 }
 .recap-full > summary::-webkit-details-marker { display: none; }
 .recap-full[open] > summary { display: none; }
+/* Blood pressure weeks: week, avg, AM, PM, count */
+.week-row.bp-row { grid-template-columns: 3.25rem repeat(3, minmax(0, 1fr)) 2rem; }

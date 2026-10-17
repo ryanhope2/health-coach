@@ -115,6 +115,37 @@ class Measurement(db.Model):
     user = db.relationship("User", back_populates="measurements")
 
 
+class BloodPressureReading(db.Model):
+    """One blood pressure reading. Several a day (a morning and evening pair, each taken
+    twice), so unlike BodyStat it's keyed by time, not upserted by date. `taken_at` is naive
+    UTC like MealEntry.logged_at — turn it into a local day with to_local_date()."""
+    __tablename__ = "blood_pressure_readings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    taken_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    systolic = db.Column(db.Integer, nullable=False)
+    diastolic = db.Column(db.Integer, nullable=False)
+    pulse = db.Column(db.Integer, nullable=True)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class MedicationChange(db.Model):
+    """A dated change to the user's meds ("Amlodipine 5 → 10 mg") — a marker on the BP
+    timeline, not a medication list. Readings from this point on belong to its regimen
+    (see app/bp_trends.py). `date`/`time` are local; time is optional (midnight when unset)."""
+    __tablename__ = "medication_changes"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    time = db.Column(db.Time, nullable=True)
+    description = db.Column(db.String(200), nullable=False)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class MealEntry(db.Model):
     """A logged meal — from a photo, a text description, or both."""
     __tablename__ = "meal_entries"

@@ -8,8 +8,9 @@ from datetime import datetime, timedelta
 
 import anthropic
 
+from . import bp_trends
 from .progress import daily_rollup, goal_baseline, period_baseline, period_position
-from .timeutils import local_now, local_today, logged_at_for, to_local_date, to_local_time
+from .timeutils import local_now, local_to_utc, local_today, logged_at_for, to_local_date, to_local_time
 
 CHAT_MODEL = "claude-sonnet-4-6"
 MAX_TOOL_ROUNDS = 5
@@ -69,6 +70,14 @@ anything, so don't claim otherwise. Critically: if the user is correcting a mist
 disputing your count, pointing out a wrong date, questioning your summary — that is NOT a log \
 request. Do not call any tool in response to a correction. Just acknowledge the error, correct your \
 answer, and move on.
+
+Blood pressure: the user is on blood pressure medication under a cardiologist's care and logs \
+readings to compare a baseline against the period after each medication change. Log each reading \
+they report with log_blood_pressure (one call per reading — "131/84 then 128/82" is two), with the \
+time they took it if they say. Log a change to their meds with log_med_change. When discussing BP, \
+use the regimen averages and readings in the data block — numbers and trends against the baseline \
+(including morning vs. evening) — not blood pressure categories, and don't advise on medication \
+or dosing; that's between them and their cardiologist.
 
 Units: weight in lbs, measurements in inches, dates as YYYY-MM-DD (default to today if the user \
 doesn't say; when they say "yesterday" or name a day, pass that date — including to log_meal). For meals described in words rather than a photo, estimate calories/protein/carbs/fat \
@@ -242,6 +251,41 @@ TOOLS = [
             "required": ["key"],
         },
     },
+    {
+        "name": "log_blood_pressure",
+        "description": "Log one blood pressure reading (systolic/diastolic mmHg, optional pulse). "
+                        "Several readings a day is normal — each is its own call. Before calling, "
+                        "check the readings in the data block; if the same numbers at the same time "
+                        "are already there, don't log them again.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "systolic": {"type": "number"},
+                "diastolic": {"type": "number"},
+                "pulse": {"type": "number"},
+                "date": {"type": "string", "description": "YYYY-MM-DD local, defaults to today. Can't be in the future."},
+                "time": {"type": "string", "description": "HH:MM 24-hour local time it was taken, defaults to now"},
+                "notes": {"type": "string"},
+            },
+            "required": ["systolic", "diastolic"],
+        },
+    },
+    {
+        "name": "log_med_change",
+        "description": "Record a change to the user's medication (new med, dose change, stopped one) "
+                        "as a dated marker on their blood pressure timeline. Readings after it are "
+                        "compared against the ones before.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "What changed, short, e.g. 'Amlodipine 5 → 10 mg'"},
+                "date": {"type": "string", "description": "YYYY-MM-DD local, defaults to today"},
+                "time": {"type": "string", "description": "HH:MM 24-hour local, only if the user gives one"},
+                "notes": {"type": "string"},
+            },
+            "required": ["description"],
+        },
+    },
 ]
 
 
@@ -266,6 +310,15 @@ def _parse_date_or_today(raw):
         except ValueError:
             pass
     return local_today()
+
+
+def _parse_time(raw):
+    if raw:
+        try:
+            return datetime.strptime(raw, "%H:%M").time()
+        except ValueError:
+            pass
+    return None
 
 
 def _latest_value(user_id, goal_type):
@@ -302,7 +355,8 @@ def _day_totals(user_id, d):
 
 def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
     from .extensions import db
-    from .models import BodyStat, CoachNote, ExerciseEntry, Goal, MealEntry, Measurement, User, normalize_note_key
+    from .models import (BloodPressureReading, BodyStat, CoachNote, ExerciseEntry, Goal, MealEntry,
+                         Measurement, MedicationChange, User, normalize_note_key)
 
     try:
         if name == "log_body_stat":
@@ -326,6 +380,31 @@ def _execute_tool(user_id: int, name: str, tool_input: dict) -> dict:
                 ))
             db.session.commit()
             return {"success": True, "date": str(d), "weight_lbs": weight, "body_fat_pct": body_fat}
+
+        if name == "log_blood_pressure":
+            reading = bp_trends.parse_bp_text(
+                f"{tool_input.get('systolic', '')} / {tool_input.get('diastolic', '')} {tool_input.get('pulse') or ''}")
+            if reading is None:
+                return {"error": "Need a plausible systolic and diastolic (and pulse, if given)"}
+            d = _parse_date_or_today(tool_input.get("date"))
+            if d > local_today():
+                return {"error": "That date is in the future"}
+            t = _parse_time(tool_input.get("time")) or local_now().time()
+            db.session.add(BloodPressureReading(
+                user_id=user_id, taken_at=local_to_utc(d, t), notes=tool_input.get("notes"), **reading))
+            db.session.commit()
+            return {"success": True, **reading, "taken_at": f"{d} {t:%H:%M}"}
+
+        if name == "log_med_change":
+            description = (tool_input.get("description") or "").strip()
+            if not description:
+                return {"error": "description is required"}
+            d = _parse_date_or_today(tool_input.get("date"))
+            db.session.add(MedicationChange(
+                user_id=user_id, date=d, time=_parse_time(tool_input.get("time")),
+                description=description[:200], notes=tool_input.get("notes")))
+            db.session.commit()
+            return {"success": True, "date": str(d)}
 
         if name == "log_measurement":
             metric = tool_input.get("metric")
@@ -477,6 +556,44 @@ def _today_line(user, today):
     return line
 
 
+def _bp_lines(user, today):
+    """Blood pressure for the data block: each regimen's settled averages (the same numbers as
+    the /bp/ page), the med changes, and the last 14 days of readings."""
+    readings, changes = bp_trends.load(user.id)
+    if not readings and not changes:
+        return []
+    lines = ["\nBlood pressure — averages by regimen (readings in the first "
+             f"{bp_trends.DEFAULT_SETTLE_DAYS} days after a change don't count toward its average):"]
+    for seg in bp_trends.segments(readings, changes):
+        st = seg["stats"]
+        label = seg["label"]
+        if seg["start"] is not None:
+            label += f" (since {seg['start'].date()}, day {(today - seg['start'].date()).days + 1})"
+        if st["n"]:
+            line = (f"  {label}: avg {st['systolic']}/{st['diastolic']} (AM {st['am']['systolic']}/{st['am']['diastolic']}, "
+                    f"PM {st['pm']['systolic']}/{st['pm']['diastolic']})"
+                    + (f", pulse {st['pulse']}" if st["pulse"] else "")
+                    + f", {st['n']} readings over {st['days']} days")
+            if seg["delta"]:
+                line += f"; change vs. previous regimen {seg['delta']['systolic']:+d}/{seg['delta']['diastolic']:+d}"
+        else:
+            line = f"  {label}: no readings counted yet"
+            if seg["counts_from"]:
+                line += f" (readings from {seg['counts_from']} on count; {len(seg['readings'])} taken so far)"
+        lines.append(line)
+    for c in changes:
+        when = f"{c.at.date()} {c.at.strftime('%-I:%M %p')}" if c.has_time else str(c.at.date())
+        lines.append(f"  Med change {when}: {c.description}" + (f" ({c.notes})" if c.notes else ""))
+    recent = [r for r in readings if r.at.date() >= today - timedelta(days=13)]
+    if recent:
+        lines.append("Readings, last 14 days:")
+        for r in recent:
+            lines.append(f"  {r.at.date()} ({r.at.strftime('%A')}) {r.at.strftime('%-I:%M %p')}: "
+                         f"{r.systolic}/{r.diastolic}" + (f", pulse {r.pulse}" if r.pulse else "")
+                         + (f" — {r.notes}" if r.notes else ""))
+    return lines
+
+
 def build_context_summary(user) -> str:
     """Summarize the user's recent data for the system prompt."""
     from .models import BodyStat, CoachNote, ExerciseEntry, Goal, MealEntry, Measurement
@@ -547,6 +664,8 @@ def build_context_summary(user) -> str:
         lines.append("\nMeasurements (last 90 days):")
         for m in recent_measurements:
             lines.append(f"  {m.date} ({m.date.strftime('%A')}): {m.metric}={m.value_in} in")
+
+    lines.extend(_bp_lines(user, today))
 
     # logged_at is naive UTC, so comparing it to a bare date cuts at UTC midnight (8pm
     # Eastern) — that pulled the evening of a 15th day in as a partial "daily total" that

@@ -3,8 +3,8 @@
 form actually appears, then checks each one."""
 import pytest
 
-from tests.builders import (day, log_meal, log_measurement, log_weight, log_workout, make_goal,
-                            make_note, make_period, make_saved_meal)
+from tests.builders import (day, log_bp, log_meal, log_measurement, log_weight, log_workout, make_goal,
+                            make_med_change, make_note, make_period, make_saved_meal)
 from tests.conftest import soup
 
 # Deliberately unguarded, with the reason.
@@ -32,9 +32,11 @@ def pages(client, user, clock):
     log_weight(user, day(0), weight=200)
     log_measurement(user, day(0))
     log_workout(user, day(0))
+    log_bp(user, day(0))
+    make_med_change(user, day(1))
     pending = log_meal(user, day(3), status="pending")
     urls = ["/", "/body/", "/meals/", "/meals/new", "/meals/quick-drinks", f"/meals/{pending.id}/review",
-            "/exercise/", "/goals/", "/coach/", "/coach/notes", "/progress/"]
+            "/exercise/", "/goals/", "/coach/", "/coach/notes", "/progress/", "/bp/"]
     responses = {url: client.get(url) for url in urls}
     assert {url: r.status_code for url, r in responses.items()} == {url: 200 for url in urls}
     return {url: soup(r) for url, r in responses.items()}

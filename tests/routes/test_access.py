@@ -2,9 +2,9 @@
 another user's records (friends get accounts on this app — their data stays private)."""
 import pytest
 
-from app.models import BodyStat, CoachNote, ExerciseEntry, Goal, MealEntry, Measurement, SavedMeal, TrackingPeriod
-from tests.builders import (day, log_meal, log_measurement, log_weight, log_workout, make_goal,
-                            make_note, make_period, make_saved_meal)
+from app.models import BloodPressureReading, BodyStat, CoachNote, ExerciseEntry, Goal, MealEntry, Measurement, MedicationChange, SavedMeal, TrackingPeriod
+from tests.builders import (day, log_bp, log_meal, log_measurement, log_weight, log_workout, make_goal,
+                            make_med_change, make_note, make_period, make_saved_meal)
 
 PUBLIC = {"login", "static"}
 
@@ -64,6 +64,9 @@ OWNED = [
     ("saved", lambda u: make_saved_meal(u), "POST", "/meals/quick/{id}", SavedMeal),
     ("saved", lambda u: make_saved_meal(u), "POST", "/meals/quick/{id}/delete", SavedMeal),
     ("drink", lambda u: make_saved_meal(u, meal_type="alcohol"), "POST", "/meals/quick-drinks/{id}/update", SavedMeal),
+    ("bp", lambda u: log_bp(u, day(0)), "POST", "/bp/reading/{id}/delete", BloodPressureReading),
+    ("med", lambda u: make_med_change(u, day(0)), "POST", "/bp/med-change/{id}/update", MedicationChange),
+    ("med", lambda u: make_med_change(u, day(0)), "POST", "/bp/med-change/{id}/delete", MedicationChange),
 ]
 
 

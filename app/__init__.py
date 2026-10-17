@@ -5,6 +5,7 @@ from flask import Flask, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
 from .blueprints.body import body_bp
+from .blueprints.bp import bp_bp
 from .blueprints.coach import coach_bp
 from .blueprints.exercise import exercise_bp
 from .blueprints.goals import goals_bp
@@ -51,6 +52,7 @@ def create_app(config=None, instance_path=None):
     app.register_blueprint(goals_bp)
     app.register_blueprint(coach_bp)
     app.register_blueprint(progress_bp)
+    app.register_blueprint(bp_bp)
 
     @app.before_request
     def require_login():
